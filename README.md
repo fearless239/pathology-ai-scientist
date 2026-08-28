@@ -11,17 +11,11 @@ system must stop for human approval.
 > the restricted AI Scientist Source Code License; it is not OSI open source. It is not a medical device,
 > clinical evidence, medical advice, or an autonomous deployment system.
 
-![Path-AI Scientist local Streamlit research workspace](docs/assets/path-ai-scientist-demo.png)
-
-### Beta verification boundary
-
-This release preserves the existing research implementation, dependency versions, and upstream
-patches. Release preparation revalidates existing archived evidence and runs offline regressions;
-it does not rerun paid research or the sealed test. A passing Demo or mocked test is not a new
-real-service end-to-end run. The newer `upstream_v2` publication backend has separate offline
-coverage; an older archived task does not prove that backend completed a live research task.
-See [the release verification record](docs/BETA_RELEASE_VALIDATION.md) for measured results and
-remaining release gates, and [publication validation limits](docs/UPSTREAM_PUBLICATION.md).
+The repository contains the executable framework, required upstream assets, configuration,
+deployment helpers, and regression tests. Historical experiment reports, generated papers,
+one-off recovery scripts, and private task evidence are not part of the source distribution.
+A passing Demo or mocked test is not a real-service end-to-end run; see the
+[publication validation limits](docs/UPSTREAM_PUBLICATION.md).
 
 ## See it in five minutes
 
@@ -111,18 +105,6 @@ invalid references, exhausted budgets, or a violated test policy stop the workfl
 - **Independent acceptance:** a deterministic validator—not the paper writer—decides whether an output
   may be described as a formal research artifact.
 
-## PathMNIST case study
-
-The curated reference case demonstrates a frozen SmallResNet evaluation across three seeds. It records
-test Macro-F1 `0.834035 ± 0.075947`, validation/test comparison, per-seed results, and the provenance
-needed to reproduce the report. The case is presented as a framework demonstration rather than a
-state-of-the-art or clinical claim.
-
-Read [the case study](docs/CASE_STUDY.md) or inspect the
-[de-identified evidence bundle](examples/pathmnist-case-study/README.md). The generated manuscript is a
-non-core, visibly non-peer-reviewed sample; the acceptance report and evidence manifest are the source
-of truth.
-
 ## Framework extension boundary
 
 `pathmnist.framework` exposes beta `Protocol` contracts:
@@ -210,7 +192,6 @@ provider smoke tests are intentionally manual.
 ## Known limitations
 
 - The validated example is PathMNIST patch classification, not whole-slide imaging.
-- A three-seed benchmark is not external replication or clinical validation.
 - Generated manuscripts require qualified human review and are not publication ready by default.
 - Upstream `AgentManager` recovery still uses task-owned pickle state; replacing it is P1 work.
 - Docker/WSL onboarding is heavier than a hosted demo, which this beta intentionally omits.
@@ -218,11 +199,9 @@ provider smoke tests are intentionally manual.
 
 ## Documentation
 
-- [Engineering deep dive](docs/ENGINEERING_DEEP_DIVE.md)
-- [Case study](docs/CASE_STUDY.md)
 - [Docker on Windows with WSL 2](docs/DOCKER_WSL.md)
-- [Architecture](docs/ARCHITECTURE.md), [beta audit](docs/BETA_AUDIT.md), and
-  [release checklist](docs/RELEASE_CHECKLIST.md)
+- [Architecture](docs/ARCHITECTURE.md) and [publication backend](docs/UPSTREAM_PUBLICATION.md)
+- [Source provenance](docs/SOURCE_PROVENANCE.md) and [release checklist](docs/RELEASE_CHECKLIST.md)
 - [Contributing](CONTRIBUTING.md), [security](SECURITY.md), and
   [third-party notices](THIRD_PARTY_NOTICES.md)
 

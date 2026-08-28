@@ -24,6 +24,17 @@ is disposable and cleared by pytest: never point it at real task state or existi
 Before the first test run, create the parent directory with
 `python -c "from pathlib import Path; Path('.test-tmp').mkdir(exist_ok=True)"`.
 
+## Repository scope
+
+Keep runtime code, required upstream templates, configuration, launch/build helpers, and framework
+regression tests. Keep documentation focused on installation, operation, architecture, provenance,
+and maintenance. Personal experiment drivers, recovery attempts, development diaries, case-study
+outputs, and generated manuscripts belong outside the tracked tree.
+
+`tests/fixtures/semantic_recovery` contains inputs used by evidence, method-spec, and runtime
+regression tests. Some inputs intentionally represent invalid generated code. They are not standalone
+experiments and should not be deleted or "fixed" without reviewing the tests that consume them.
+
 ## Safety and scientific integrity
 
 - Generated experiment code must run only in the configured sandbox.
