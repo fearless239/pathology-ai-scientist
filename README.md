@@ -196,7 +196,8 @@ The upstream snapshot is pinned under `vendor/AI-Scientist-v2` and checked by
 ```bash
 python -m pip install -e ".[dev]"
 python -m ruff check path_ai_scientist pathmnist gate_a app.py
-python -m pytest -q
+python -c "from pathlib import Path; Path('.test-tmp').mkdir(exist_ok=True)"
+python -m pytest -q --basetemp .test-tmp/pytest
 path-ai-scientist-release-check --repo .
 path-ai-scientist-demo --output .demo/first
 path-ai-scientist-demo --output .demo/second
