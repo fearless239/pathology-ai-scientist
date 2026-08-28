@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "baseline": "E2E_UPSTREAM_BASELINE.json",
+  "patches": [
+    {
+      "path": "ai_scientist/perform_writeup.py",
+      "baseline_sha256": "393bceb4dd3e2bea21eb34803c8698541e481bf93caed6ae4e2d8789641e1f22",
+      "patched_sha256": "7e964f97f1478d1474a6c86eb57ea32c1a9601f9f9f2684daed094a44b26059f",
+      "purpose": "Extract native draft/reflection steps and lazily import optional VLM dependency; original entry reuses steps.",
+      "tests": [
+        "tests/test_upstream_publication.py"
+      ]
+    },
+    {
+      "path": "ai_scientist/perform_llm_review.py",
+      "baseline_sha256": "1dbca6776334270867703fd4f3369ceae9adb085ec8a45f07f7b191ffa20fab5",
+      "patched_sha256": "85721d47617a98a1bdd2bbe8f470df7325c5f7c25441a6dfbe4c809601cc45d8",
+      "purpose": "Inject scoped single-review query and defer PDF-only dependencies until load_paper.",
+      "tests": [
+        "tests/test_upstream_publication.py"
+      ]
+    },
+    {
+      "path": "ai_scientist/utils/token_tracker.py",
+      "baseline_sha256": "f749a8e4bddb9be8cfe92fecefec6f57147405d83ff00e983f2bd819b1005e77",
+      "patched_sha256": "148d8bc40e02508ba2ba5d902dd44a552c144c4d681795c3e67970fd4392e870",
+      "purpose": "Remove unused tiktoken import; no accounting behavior change.",
+      "tests": [
+        "tests/test_upstream_publication.py"
+      ]
+    }
+  ]
+}

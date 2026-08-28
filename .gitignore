@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+.venv-wsl/
+.ci-paper-fixture/
+.demo/
+.test-tmp/
+tmp/
+work/
+.beta-validation/
+
+# Secrets must never be materialized in the repository.
+.env
+.env.*
+!.env.example
+
+# Gate A runtime state and generated artifacts.
+runs/
+state/
+build/
+dist/
+
+# The dataset is intentionally outside Gate A and must not be committed.
+pathmnist_64.npz
+
+# The vendored upstream source is tracked; its generated files are not.
+vendor/AI-Scientist-v2/experiments/
+vendor/AI-Scientist-v2/logs/
+vendor/AI-Scientist-v2/workspaces/
+
+# LaTeX build intermediates; the .tex sources and .pdf deliverables are tracked.
+docs/latex/*.aux
+docs/latex/*.log
+docs/latex/*.out
+docs/latex/*.fls
+docs/latex/*.fdb_latexmk
+docs/latex/*.synctex.gz
+docs/latex/*.xdv
+docs/latex/*.toc
+docs/latex/*.lof
+docs/latex/*.lot

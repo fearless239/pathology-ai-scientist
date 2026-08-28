@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "path-ai-scientist"
+version = "0.1.0b1"
+description = "Auditable research-agent framework for computational pathology, with PathMNIST as the reference implementation"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema==4.25.1",
+  "numpy==1.26.4",
+  "omegaconf==2.3.0",
+  "PyYAML==6.0.2",
+  "rich==14.1.0",
+]
+
+[project.optional-dependencies]
+agent = [
+  "anthropic==0.64.0",
+  "backoff==2.2.1",
+  "black==25.1.0",
+  "coolname==2.2.0",
+  "dataclasses-json==0.6.7",
+  "funcy==2.0",
+  "genson==1.3.0",
+  "humanize==4.12.3",
+  "openai==1.99.9",
+  "python-igraph==0.11.9",
+  "shutup==0.2.0",
+]
+ui = [
+  "matplotlib==3.9.2",
+  "pandas==2.2.3",
+  "streamlit==1.50.0",
+]
+paper = [
+  "matplotlib==3.9.2",
+  "pandas==2.2.3",
+]
+training = [
+  # PyTorch is supplied by the pinned CUDA runner image.
+  "scikit-learn==1.7.1",
+]
+dev = [
+  "anthropic==0.64.0",
+  "backoff==2.2.1",
+  "black==25.1.0",
+  "coolname==2.2.0",
+  "dataclasses-json==0.6.7",
+  "funcy==2.0",
+  "genson==1.3.0",
+  "humanize==4.12.3",
+  "matplotlib==3.9.2",
+  "openai==1.99.9",
+  "pandas==2.2.3",
+  "python-igraph==0.11.9",
+  "shutup==0.2.0",
+  "streamlit==1.50.0",
+  "pytest==8.4.1",
+  "ruff==0.12.9",
+  "scikit-learn==1.7.1",
+]
+
+[project.scripts]
+path-ai-scientist = "path_ai_scientist.core.orchestrator:main"
+path-ai-scientist-accept = "path_ai_scientist.core.acceptance:main"
+path-ai-scientist-release-check = "pathmnist.release_check:main"
+path-ai-scientist-demo = "pathmnist.demo:main"
+# Deprecated compatibility commands. They remain available for existing local tasks.
+path-scientist-gate-a = "gate_a.cli:main"
+path-scientist-accept = "pathmnist.autonomous_acceptance:main"
+path-scientist-release-check = "pathmnist.release_check:main"
+path-scientist-v2 = "pathmnist.autonomous_orchestrator:main"
+path-scientist-demo = "pathmnist.demo:main"
+
+[tool.setuptools.packages.find]
+include = ["path_ai_scientist*", "gate_a*", "pathmnist*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,88 @@
+schema_version: 1
+display_name: Path-AI Scientist Gate A (Zhipu)
+
+# Generic OpenAI-compatible gateway, currently pointed at the Paratera LLM API
+# (llmapi.paratera.com). The key must stay in the process environment as
+# PARATERA_API_KEY and is never accepted from a file or CLI option.
+# VERIFY the path and model IDs with:
+#   curl -s https://llmapi.paratera.com/v1/models \
+#     -H "Authorization: Bearer $PARATERA_API_KEY"
+provider:
+  name: openai_compatible
+  base_url: https://llmapi.paratera.com/v1
+  api_key_env: PARATERA_API_KEY
+  timeout_seconds: 120
+  max_retries: 5
+
+budget:
+  hard_limit_usd: 8.0
+  reserve_margin: 1.15
+  # Zhipu publishes prices in CNY while the Gate A ledger is USD-capped. This pinned
+  # rate is an engineering approximation recorded with each run, not a market feed.
+  cny_per_usd: 7.1
+
+# The gateway exposes no priced machine-readable catalog, so prices are pinned here
+# from public 2026-06/2026-08 GLM list-price reports. Depending on your plan this may
+# be subscription-billed, so the USD ledger is an accounting proxy that keeps the
+# reservation discipline and hard cap, not necessarily a per-token charge.
+# VERIFY the model IDs below against the /v1/models response for your account.
+models:
+  GLM-5.2:
+    context_length: 1048576
+    price_cny_per_m_input: 8.0
+    price_cny_per_m_output: 28.0
+  GLM-5.1:
+    context_length: 204800
+    price_cny_per_m_input: 6.0
+    price_cny_per_m_output: 24.0
+
+roles:
+  ideation:
+    candidates: [GLM-5.2, GLM-5.1]
+    max_input_tokens: 5000
+    max_output_tokens: 3500
+    required_parameters: []
+  experiment_code:
+    candidates: [GLM-5.2, GLM-5.1]
+    max_input_tokens: 10000
+    # Complete autonomous programs may include data loading, training, controls,
+    # evidence output, and debugging notes. Keep enough room for code without
+    # truncating a valid program at the provider boundary.
+    max_output_tokens: 12000
+    required_parameters: []
+  plotting:
+    candidates: [GLM-5.2, GLM-5.1]
+    max_input_tokens: 7000
+    max_output_tokens: 1800
+    required_parameters: []
+  paper_writer:
+    candidates: [GLM-5.2, GLM-5.1]
+    max_input_tokens: 12000
+    # Full papers, evidence-bounded revisions, and bilingual translations need
+    # enough room for complete sections without truncating conclusions or refs.
+    max_output_tokens: 7000
+    required_parameters: []
+  reviewer:
+    candidates: [GLM-5.1, GLM-5.2]
+    max_input_tokens: 12000
+    # GLM-5.1 may account hidden reasoning against this ceiling even when the
+    # compatible gateway receives thinking.type=disabled. Leave enough room for
+    # reasoning plus the explicitly concise review.
+    max_output_tokens: 7000
+    required_parameters: []
+
+runner:
+  image: path-scientist-gate-a-runner:0.1
+  timeout_seconds: 180
+  cpus: 2.0
+  memory: 2g
+  pids_limit: 128
+  docker_command: [docker]
+
+gate_a:
+  topic: Test whether a small deterministic synthetic binary classification baseline
+    can be improved by a simple, explicitly stated feature transformation. This is
+    an engineering smoke study only and must not make real-world or clinical claims.
+  bfts_nodes: 1
+  random_seed: 7
+

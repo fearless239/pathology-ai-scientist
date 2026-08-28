@@ -1,0 +1,71 @@
+schema_version: 1
+dataset:
+  path: pathmnist_64.npz
+  sha256: 1E7FC200DD5AAC79F39F0DA26178BE801FFAC8E6D59C8533E51ACEBAE953745A
+  expected_splits:
+    train: 89996
+    val: 10004
+    test: 7180
+  classes: 9
+experiment:
+  primary_metric: macro_f1
+  seeds: [7, 17, 27]
+  epochs: 40
+  batch_size: 256
+  num_workers: 2
+  early_stop_patience: 8
+  baseline_learning_rate: 0.001
+  tuning_grid:
+    learning_rate: [0.0005, 0.001, 0.002]
+    weight_decay: [0.00001, 0.0001]
+  improvements:
+    augmentation:
+      horizontal_flip: true
+      vertical_flip: true
+      rotation_degrees: 15
+      color_jitter: 0.2
+    optimization:
+      scheduler: one_cycle
+      weight_decay: 0.0001
+      label_smoothing: 0.1
+    multiscale:
+      channels: [16, 32]
+variants:
+  - name: baseline
+    augmentation: false
+    optimization: false
+    multiscale: false
+  - name: augmentation
+    augmentation: true
+    optimization: false
+    multiscale: false
+  - name: optimization
+    augmentation: false
+    optimization: true
+    multiscale: false
+  - name: multiscale
+    augmentation: false
+    optimization: false
+    multiscale: true
+  - name: combined
+    augmentation: true
+    optimization: true
+    multiscale: true
+ablations:
+  - name: combined_no_augmentation
+    base: combined
+    disable: augmentation
+    augmentation: false
+    optimization: true
+    multiscale: true
+  - name: combined_no_multiscale
+    base: combined
+    disable: multiscale
+    augmentation: true
+    optimization: true
+    multiscale: false
+runner:
+  image: path-scientist-pathmnist-runner:0.1
+  timeout_seconds: 21600
+  memory: 16g
+  cpus: 8.0

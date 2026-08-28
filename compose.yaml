@@ -1,0 +1,17 @@
+name: path-ai-scientist
+
+services:
+  demo:
+    build:
+      context: .
+      dockerfile: docker/demo.Dockerfile
+    ports:
+      - "8501:8501"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.demo:uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

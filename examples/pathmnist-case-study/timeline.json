@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "events": [
+    {"event": "candidate_selected", "basis": "validation_macro_f1", "test_visible": false},
+    {"event": "candidate_frozen", "status": "accepted"},
+    {"event": "sealed_test_approved", "actor": "human"},
+    {"event": "sealed_test_evaluated", "count": 1},
+    {"event": "comparison_reported", "fields": ["validation_to_test_gap", "per_seed_macro_f1"]}
+  ]
+}

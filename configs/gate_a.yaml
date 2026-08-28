@@ -1,0 +1,66 @@
+schema_version: 1
+display_name: Path-AI Scientist Gate A
+budget:
+  hard_limit_usd: 8.0
+  reserve_margin: 1.15
+openrouter:
+  base_url: https://openrouter.ai/api/v1
+  timeout_seconds: 120
+  max_retries: 2
+  app_title: path-ai-scientist-gate-a
+roles:
+  ideation:
+    candidates:
+    - z-ai/glm-5.2
+    - z-ai/glm-5.1
+    max_input_tokens: 5000
+    max_output_tokens: 1200
+    required_parameters:
+    - tools
+    - tool_choice
+  experiment_code:
+    candidates:
+    - z-ai/glm-5.2
+    - z-ai/glm-5.1
+    max_input_tokens: 10000
+    max_output_tokens: 2600
+    required_parameters: []
+  plotting:
+    candidates:
+    - z-ai/glm-5.2
+    - z-ai/glm-5.1
+    max_input_tokens: 7000
+    max_output_tokens: 1800
+    required_parameters: []
+  paper_writer:
+    candidates:
+    - z-ai/glm-5.2
+    - z-ai/glm-5.1
+    max_input_tokens: 12000
+    max_output_tokens: 3500
+    required_parameters:
+    - tools
+    - tool_choice
+  reviewer:
+    candidates:
+    - z-ai/glm-5.1
+    - z-ai/glm-5.2
+    max_input_tokens: 12000
+    max_output_tokens: 2200
+    required_parameters:
+    - tools
+    - tool_choice
+runner:
+  image: path-scientist-gate-a-runner:0.1
+  timeout_seconds: 180
+  cpus: 2.0
+  memory: 2g
+  pids_limit: 128
+  docker_command:
+  - docker
+gate_a:
+  topic: Test whether a small deterministic synthetic binary classification baseline
+    can be improved by a simple, explicitly stated feature transformation. This is
+    an engineering smoke study only and must not make real-world or clinical claims.
+  bfts_nodes: 1
+  random_seed: 7

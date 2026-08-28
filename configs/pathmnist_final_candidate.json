@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "status": "approved_frozen",
+  "approved_by": "project_owner",
+  "approved_at": "2026-08-18",
+  "dataset_sha256": "1e7fc200dd5aac79f39f0da26178be801ffac8e6d59c8533e51acebae953745a",
+  "model": "SmallResNet",
+  "variant": "optimization",
+  "hyperparameters": {
+    "augmentation": false,
+    "multiscale": false,
+    "one_cycle": true,
+    "label_smoothing": 0.1,
+    "learning_rate": 0.001,
+    "weight_decay": 1e-05
+  },
+  "seeds": [7, 17, 27],
+  "primary_metric": "macro_f1",
+  "test_policy": {
+    "split": "test",
+    "evaluations_allowed": 1,
+    "tuning_feedback_allowed": false
+  }
+}

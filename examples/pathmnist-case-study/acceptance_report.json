@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "passed_for": "engineering case-study publication",
+  "accepted": [
+    "one-time post-freeze test evaluation",
+    "metric provenance summary",
+    "validation/test comparison disclosure",
+    "de-identified engineering timeline"
+  ],
+  "not_accepted": [
+    "clinical performance claim",
+    "state-of-the-art claim",
+    "autonomous scientific validity claim",
+    "claims beyond the curated evidence bundle"
+  ]
+}

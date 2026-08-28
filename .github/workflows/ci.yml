@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m ruff check path_ai_scientist pathmnist gate_a app.py
+      - run: mkdir -p .test-tmp
+      - run: python -m pytest -q --basetemp .test-tmp/ci
+      - name: Deterministic zero-cost demo
+        run: |
+          path-ai-scientist-demo --output .demo/first
+          path-ai-scientist-demo --output .demo/second
+          python -c "import json; from pathlib import Path; a=json.loads(Path('.demo/first/manifest.json').read_text())['artifacts']; b=json.loads(Path('.demo/second/manifest.json').read_text())['artifacts']; assert a == b"
+      - name: Public-beta release boundary report
+        run: path-ai-scientist-release-check --repo .
+
+  offline-paper-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: mkdir -p .test-tmp
+      - run: python -m pytest -q --basetemp .test-tmp/paper tests/test_figures.py tests/test_autonomous_acceptance.py tests/test_pathmnist_paper_export.py
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --pull=false -f docker/demo.Dockerfile -t path-ai-scientist-demo:ci .
+      - name: Verify non-root, offline, read-only, secret-free Demo and UI health
+        run: bash scripts/verify-docker.sh path-ai-scientist-demo:ci
+      - run: docker build --pull=false -f docker/orchestrator.Dockerfile -t path-scientist-orchestrator:ci .
+      - run: docker build --pull=false -f docker/runner.Dockerfile -t path-scientist-runner:ci -t path-scientist-gate-a-runner:0.2 .
+      - name: Build the current publication compiler from its required base
+        run: docker build --pull=false -f docker/publication.Dockerfile -t path-scientist-publication-runner:ci .
+      - name: Build illustrated PDF fixture in the pinned runner
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace path-scientist-runner:ci \
+            python scripts/ci-paper-fixture.py --output /workspace/.ci-paper-fixture
+          docker run --rm -v "$PWD/.ci-paper-fixture:/workspace" -w /workspace \
+            path-scientist-runner:ci pdflatex -interaction=nonstopmode -halt-on-error paper.tex
+          test -s .ci-paper-fixture/paper.pdf
+          rm -rf .ci-paper-fixture
+
+# GPU training and paid-provider smoke tests are intentionally manual and are
+# not part of pull-request CI. They require local data, hardware, and explicit
+# cost approval.

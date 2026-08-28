@@ -1,0 +1,16 @@
+{
+  "id": "proposed_method",
+  "name": "Label smoothing cross-entropy loss on the same lightweight 3-conv-layer CNN",
+  "description": "Replace the standard cross-entropy loss with a label smoothing variant that mixes the hard target distribution with a uniform distribution over the nine classes (smoothing factor determined on a 20% subset of the training set). The CNN architecture (3 convolutional layers, trained from scratch, no external weights) and all other hyperparameters remain identical to the baseline. The method adds negligible compute overhead per training step. Final evaluation runs once on the full training set for both baseline and intervention groups.",
+  "required": true,
+  "implementation_signals": [
+    "label_smoothing",
+    "smoothing_factor",
+    "conv_layers",
+    "cross_entropy",
+    "from_scratch",
+    "num_classes",
+    "test_accuracy",
+    "train_subset_fraction"
+  ]
+}

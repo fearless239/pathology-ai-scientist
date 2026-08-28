@@ -1,0 +1,16 @@
+# Generated from path-scientist-gate-a-runner:0.1 with `python -m pip freeze`.
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.63.0
+joblib==1.5.3
+kiwisolver==1.5.0
+matplotlib==3.9.2
+numpy==1.26.4
+packaging==26.3
+pillow==12.3.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+scikit-learn==1.5.2
+scipy==1.17.1
+six==1.17.0
+threadpoolctl==3.6.0
