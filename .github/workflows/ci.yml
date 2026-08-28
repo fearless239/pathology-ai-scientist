@@ -56,9 +56,12 @@ jobs:
         run: docker build --pull=false -f docker/publication.Dockerfile -t path-scientist-publication-runner:ci .
       - name: Build illustrated PDF fixture in the pinned runner
         run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace path-scientist-runner:ci \
+          # Keep generated files owned by the runner so host cleanup can remove them.
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/workspace" -w /workspace path-scientist-runner:ci \
             python scripts/ci-paper-fixture.py --output /workspace/.ci-paper-fixture
-          docker run --rm -v "$PWD/.ci-paper-fixture:/workspace" -w /workspace \
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD/.ci-paper-fixture:/workspace" -w /workspace \
             path-scientist-runner:ci pdflatex -interaction=nonstopmode -halt-on-error paper.tex
           test -s .ci-paper-fixture/paper.pdf
           rm -rf .ci-paper-fixture
