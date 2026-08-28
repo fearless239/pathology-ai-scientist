@@ -3,15 +3,18 @@
 ## Input baseline
 
 - Input supplied by the project author: an unpacked `AI-Scientist-v2` source snapshot
-- Copied, unmodified baseline: `vendor/AI-Scientist-v2`
+- Original baseline location: `vendor/AI-Scientist-v2`; the distributed tree now includes local patches
 - Upstream project named by the supplied README: `SakanaAI/AI-Scientist_v2`
 - License retained verbatim at `vendor/AI-Scientist-v2/LICENSE`
 - The supplied directory did not contain Git metadata, so an upstream commit is not guessed.
   `UPSTREAM_MANIFEST.sha256` is the authoritative identity for this local baseline.
 
-The Gate A implementation lives outside `vendor/AI-Scientist-v2`. No file in the vendored
-directory is intentionally patched. This makes the source boundary and all local adaptations
-auditable.
+The Gate A implementation lives outside `vendor/AI-Scientist-v2`. The current vendored tree
+also contains previously implemented execution and publication patches; it must not be described
+as unmodified. `UPSTREAM_MANIFEST.sha256` identifies the original baseline, not the current patched
+tree. See `docs/E2E_UPSTREAM_BASELINE.json`, `docs/UPSTREAM_PUBLICATION_PATCHES.json`, and
+`docs/ARCHITECTURE.md` for the baseline and patch boundaries. The release commit identifies the
+distributed file contents. Beta release preparation adds no upstream code patches.
 
 ## Gate A scope
 

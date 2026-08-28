@@ -101,6 +101,13 @@ try `docker version` there.
 This is a Windows-mounted-directory build-context problem. Use `scripts/build-demo-wsl.sh`, or clone
 the repository into the WSL Linux filesystem.
 
+### Concurrent test state on a Windows-mounted filesystem
+
+Release verification observed `OSError: [Errno 61] No data available` while concurrently reading
+test state through a Windows bind mount. Use a fresh clone on the native Linux filesystem for
+Linux regression tests and new long-running task state. This is not permission to move, rewrite,
+or resume an existing archived task. See `BETA_RELEASE_VALIDATION.md` for the measured boundary.
+
 ### Cannot connect to the Docker daemon
 
 Check the daemon inside Ubuntu:

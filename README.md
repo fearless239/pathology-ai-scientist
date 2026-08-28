@@ -187,8 +187,8 @@ cannot grant formal acceptance, and is not a public control plane.
 | Cost | Provider calls | Reservation ledger and hard task budget |
 | Publication | Writer/reviewer concepts | Figure/reference/disclosure/PDF gates and failure diagnosis |
 
-The upstream snapshot is pinned under `vendor/AI-Scientist-v2` and checked by
-`UPSTREAM_MANIFEST.sha256`. See [architecture](docs/ARCHITECTURE.md) and
+The upstream snapshot and existing local patches are retained under `vendor/AI-Scientist-v2`.
+`UPSTREAM_MANIFEST.sha256` records the original baseline, not the patched tree. See [architecture](docs/ARCHITECTURE.md) and
 [source provenance](docs/SOURCE_PROVENANCE.md).
 
 ## Development and verification

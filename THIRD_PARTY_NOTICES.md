@@ -9,7 +9,8 @@ for the applicable license texts.
 - Project: The AI Scientist-v2, Sakana AI
 - Source: https://github.com/SakanaAI/AI-Scientist-v2
 - Local snapshot: `vendor/AI-Scientist-v2`
-- Identity: `UPSTREAM_MANIFEST.sha256`
+- Original baseline identity: `UPSTREAM_MANIFEST.sha256`
+- Existing local patches: see `docs/SOURCE_PROVENANCE.md`; the release commit identifies the distributed tree
 - License: The AI Scientist Source Code License v1.0
 - Retained license: `vendor/AI-Scientist-v2/LICENSE`
 
