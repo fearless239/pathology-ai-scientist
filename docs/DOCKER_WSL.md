@@ -106,7 +106,7 @@ the repository into the WSL Linux filesystem.
 Release verification observed `OSError: [Errno 61] No data available` while concurrently reading
 test state through a Windows bind mount. Use a fresh clone on the native Linux filesystem for
 Linux regression tests and new long-running task state. This is not permission to move, rewrite,
-or resume an existing archived task. See `BETA_RELEASE_VALIDATION.md` for the measured boundary.
+or resume an existing archived task. Keep existing evidence intact when preparing a fresh checkout.
 
 ### Cannot connect to the Docker daemon
 

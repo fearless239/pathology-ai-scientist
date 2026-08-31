@@ -84,10 +84,7 @@ def check_release(repo: Path, max_bytes: int = 10 * 1024 * 1024) -> dict:
         "compose.yaml",
         "docker/demo.Dockerfile",
         "docs/ARCHITECTURE.md",
-        "docs/CASE_STUDY.md",
-        "docs/ENGINEERING_DEEP_DIVE.md",
         "docs/RELEASE_CHECKLIST.md",
-        "examples/pathmnist-case-study/acceptance_report.json",
     ):
         if required not in tracked:
             errors.append(f"required release file is not tracked: {required}")

@@ -15,7 +15,6 @@
   <p>
     <a href="#快速开始">快速开始</a> ·
     <a href="docs/ARCHITECTURE.md">系统架构</a> ·
-    <a href="docs/CASE_STUDY.md">案例研究</a> ·
     <a href="#文档">文档</a>
   </p>
 </div>
@@ -37,9 +36,9 @@ Pathology-AI-Scientist 是一个基于
 PathMNIST 是当前 Beta 版本支持的首个参考数据集。
 
 > **说明：**
-> 本仓库是 `v0.1.0-beta` 高级研究原型。当前验证边界记录在
-> [发布验证报告](docs/BETA_RELEASE_VALIDATION.md)中。Demo 或模拟测试通过，并不构成一次新的真实
-> 服务商或密封测试研究运行。
+> 本仓库是 `v0.1.0-beta` 高级研究原型，分发可执行框架、必要的上游资源、配置、部署工具和回归测试。
+> 历史实验报告、生成论文、一次性恢复脚本和私有任务证据保存在源码分发之外。Demo 或模拟测试通过，
+> 并不构成一次新的真实服务商或密封测试研究运行。
 
 > **注意！**
 > 完整研究模式会执行 LLM 生成的代码。请仅在项目提供的受限 Docker 环境中运行，并审查每个人工
@@ -254,9 +253,9 @@ PathMNIST 是当前 Beta 版本的首个完整参考适配器。框架接口计�
 ## 文档
 
 - [系统架构](docs/ARCHITECTURE.md)
-- [工程深度解析](docs/ENGINEERING_DEEP_DIVE.md)
-- [案例研究](docs/CASE_STUDY.md)
-- [发布验证](docs/BETA_RELEASE_VALIDATION.md)
+- [论文发布后端](docs/UPSTREAM_PUBLICATION.md)
+- [源码来源](docs/SOURCE_PROVENANCE.md)
+- [发布检查清单](docs/RELEASE_CHECKLIST.md)
 - [在 Windows 上通过 WSL 2 使用 Docker](docs/DOCKER_WSL.md)
 - [贡献指南](CONTRIBUTING.md)、[安全说明](SECURITY.md)和[第三方声明](THIRD_PARTY_NOTICES.md)
 

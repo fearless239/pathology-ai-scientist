@@ -51,7 +51,7 @@ execution, and Docker PDF compilation until the corresponding explicit authoriza
 The `figures_generated` stage emits a versioned plan and manifest; formal papers may reference only
 manifest-backed local figures whose source artifacts and fields are recorded.
 
-## Upstream-centered refactor (2026-08-28)
+## Execution and recovery boundaries
 
 The production executor remains AI-Scientist-v2 `AgentManager.run`: one search
 journal, one stage loop and one checkpoint authority. `stage_policy.py` centralizes
@@ -79,19 +79,15 @@ The experimental `execution_plan.py` callback scheduler is NOT a production
 backend and is not imported by the execution entry points. Explicit approved DAG
 contracts fail with a migration-required diagnostic; ordinary multi-step research
 prose uses upstream nodes rather than being rejected for not having a DAG.
-`docs/MULTISTEP_EXECUTION.md` records its earlier experimental status, not the
-current production roadmap.
 
 Recovery granularity is an upstream node. This refactor does NOT promise automatic
 resumption inside a generated training loop. Such reuse requires independently
 validated training checkpoints; partial metrics alone are insufficient.
 
-Validation: 124 scoped offline tests, including the real upstream run loop with
-fake experiment execution, plus budget/role and prior evidence regression tests.
-No paid generation or GPU training was performed for this refactor. The existing
-failed task and its approved contract/checkpoint were not rewritten. Its last
-program has four launches and 39 epochs and therefore still requires a bounded
-repair before it can be run under the 30-epoch policy.
+The regression suite exercises the upstream run loop with external execution replaced,
+along with budget/role and evidence checks. This is not proof of a new paid or GPU run.
+Legacy report/export commands consume user-generated reports; historical M4/M5 reports
+and generated papers are deliberately not bundled as framework assets.
 
 ### Training limits and early stopping
 

@@ -15,7 +15,6 @@
   <p>
     <a href="#quick-start">Quick Start</a> ·
     <a href="docs/ARCHITECTURE.md">Architecture</a> ·
-    <a href="docs/CASE_STUDY.md">Case Study</a> ·
     <a href="#documentation">Documentation</a>
   </p>
 </div>
@@ -39,9 +38,11 @@ research paradigm into an executable workflow for computational pathology throug
 PathMNIST is the first supported reference dataset in the current beta release.
 
 > **Note:**
-> This repository is a `v0.1.0-beta` advanced research prototype. Its current validation boundary is
-> documented in the [release verification record](docs/BETA_RELEASE_VALIDATION.md). Demo and mocked-test
-> success do not constitute a new live-provider or sealed-test research run.
+> This repository is a `v0.1.0-beta` advanced research prototype. It distributes the executable
+> framework, required upstream assets, configuration, deployment helpers, and regression tests.
+> Historical experiment reports, generated papers, one-off recovery scripts, and private task evidence
+> are kept outside the source distribution. Demo and mocked-test success do not constitute a new
+> live-provider or sealed-test research run.
 
 > **Caution!**
 > Full Research Mode executes LLM-generated code. Run it only inside the provided restricted Docker
@@ -263,9 +264,9 @@ to support additional pathology datasets over time.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Engineering deep dive](docs/ENGINEERING_DEEP_DIVE.md)
-- [Case study](docs/CASE_STUDY.md)
-- [Release verification](docs/BETA_RELEASE_VALIDATION.md)
+- [Publication backend](docs/UPSTREAM_PUBLICATION.md)
+- [Source provenance](docs/SOURCE_PROVENANCE.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Docker on Windows with WSL 2](docs/DOCKER_WSL.md)
 - [Contributing](CONTRIBUTING.md), [security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md)
 
