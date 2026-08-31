@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "task_id": "pathtest-001",
+  "case_type": "historical_end_to_end_run",
+  "publication_mode": "research_paper",
+  "status": "archived",
+  "control_at_snapshot": "paused",
+  "created_at": "2026-08-27T20:13:09.205831+00:00",
+  "completed_at": "2026-08-28T08:44:26.856347+00:00",
+  "dataset": {
+    "name": "PathMNIST",
+    "source_image_shape": [64, 64, 3],
+    "model_input_shape": [28, 28, 3],
+    "classes": 9,
+    "split_counts": {
+      "train": 89996,
+      "validation": 10004,
+      "test": 7180
+    },
+    "data_included": false
+  },
+  "research_question": "Evaluate label smoothing cross-entropy against standard cross-entropy in the same lightweight three-convolution-layer CNN trained from scratch on PathMNIST.",
+  "completed_stages": [
+    "task_created",
+    "dataset_discovered",
+    "dataset_validated",
+    "research_understood",
+    "literature_collected",
+    "idea_proposed",
+    "research_contract_generated",
+    "research_contract_approved",
+    "experiment_spec_validated",
+    "sandbox_prechecked",
+    "initial_implementation_completed",
+    "baseline_tuning_completed",
+    "creative_research_completed",
+    "candidate_selected",
+    "candidate_frozen",
+    "test_evaluation_approved",
+    "test_evaluated",
+    "analysis_completed",
+    "figures_generated",
+    "paper_written",
+    "review_completed",
+    "revision_completed",
+    "translation_completed",
+    "archived"
+  ],
+  "not_applicable_stages": ["ablations_completed"],
+  "public_evidence_boundary": "Curated summaries, figures, and final papers only; the task state and executable evidence archive are not distributed."
+}

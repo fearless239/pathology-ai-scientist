@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "dataset": "PathMNIST",
+  "model": "LightweightCNN_3conv",
+  "optimizer": "SGD",
+  "learning_rate": 0.01,
+  "max_epochs": 12,
+  "epochs": 12,
+  "batch_size": 128,
+  "seed": 0,
+  "split_seed": 7,
+  "input_resolutions": [[28, 28]],
+  "primary_metric": "accuracy",
+  "selection_metric": "accuracy",
+  "checkpoint_selection": {
+    "metric": "validation_loss",
+    "mode": "min"
+  },
+  "hardware": "cuda",
+  "num_classes": 9,
+  "weight_decay": 0.0005,
+  "momentum": 0.9,
+  "early_stopping": {
+    "enabled": true,
+    "monitor": "validation_loss",
+    "mode": "min",
+    "patience": 5,
+    "min_delta": 0.0
+  },
+  "training_runs": [
+    {"max_epochs": 5, "epochs": 5},
+    {"max_epochs": 5, "epochs": 5},
+    {"max_epochs": 5, "epochs": 5},
+    {"max_epochs": 12, "epochs": 12}
+  ],
+  "selected_parameters": {
+    "smoothing_factor": 0.15,
+    "learning_rate": 0.01,
+    "batch_size": 128,
+    "weight_decay": 0.0005,
+    "momentum": 0.9
+  },
+  "loss_function": "CrossEntropyLoss_with_label_smoothing",
+  "label_smoothing": 0.15,
+  "train_subset_fraction": 0.2
+}

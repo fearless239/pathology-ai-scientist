@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "task_id": "pathtest-001",
+  "analysis_mode": "descriptive_only",
+  "seed_count": 1,
+  "validation": {
+    "baseline": {"accuracy": 0.7383046781287484, "macro_f1": 0.7083536356528063},
+    "proposed_method": {"accuracy": 0.8149740103958416, "macro_f1": 0.8185641158204908},
+    "difference": {"accuracy": 0.07666933226709316, "macro_f1": 0.1102104801676845},
+    "required_accuracy_delta": 0.01,
+    "contract_threshold_met": true,
+    "macro_f1_guardrail_met": true
+  },
+  "held_out_test": {
+    "attempt_count": 1,
+    "baseline": {
+      "accuracy": 0.6065459610027855,
+      "macro_f1": 0.5806301660663766,
+      "weighted_f1": 0.5805987111935774
+    },
+    "proposed_method": {
+      "accuracy": 0.8075208913649025,
+      "macro_f1": 0.7313809220989075,
+      "weighted_f1": 0.7975936383882947
+    },
+    "difference": {
+      "accuracy": 0.200974930362117,
+      "macro_f1": 0.1507507560325309
+    }
+  },
+  "limitations": [
+    "Only one training seed was used; no confidence interval or significance test was specified.",
+    "The held-out comparison is descriptive and was not used for tuning or model selection.",
+    "The baseline test accuracy was anomalously low and may reflect underfitting or training instability.",
+    "The observed difference must not be generalized as a confirmed causal effect of label smoothing.",
+    "The claim boundary is patch-level classification; no clinical or patient-level claim is supported."
+  ]
+}

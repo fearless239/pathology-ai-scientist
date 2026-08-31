@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_id": "pathtest-001",
+  "target_stage": "archived",
+  "passed": true,
+  "errors": [],
+  "warnings": [],
+  "data_integrity": "passed",
+  "sealed_test_integrity": "passed",
+  "metric_integrity": "passed",
+  "research_contract_integrity": "passed",
+  "comparison_integrity": "passed",
+  "repeat_integrity": "passed",
+  "statistical_integrity": "passed",
+  "publication_mode": "research_paper",
+  "require_pdf": true,
+  "revalidated_commit": "887bafdd03d697b4969aa64e09bda7d65f28ac5b",
+  "revalidated_on": "2026-09-01"
+}

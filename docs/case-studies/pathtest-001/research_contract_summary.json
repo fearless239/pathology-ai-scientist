@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_contract_schema_version": 2,
+  "contract_sha256": "ec2ad035052ca3057f22e628db1fb47f63f585dd145c32afd368b117fefbd788",
+  "task_family": "supervised_image_classification",
+  "baseline": {
+    "id": "baseline",
+    "model": "Lightweight three-convolution-layer CNN",
+    "loss": "standard cross-entropy"
+  },
+  "intervention": {
+    "id": "proposed_method",
+    "model": "Same lightweight three-convolution-layer CNN",
+    "loss": "label smoothing cross-entropy",
+    "required": true
+  },
+  "primary_metric": "accuracy",
+  "guardrail_metric": "macro_f1",
+  "required_validation_accuracy_delta": 0.01,
+  "repeat_plan": {
+    "count": 1,
+    "seeds": [0],
+    "fixed_split": true,
+    "split_seed": 7
+  },
+  "statistical_plan": {
+    "mode": "descriptive_only",
+    "confidence_interval": null,
+    "significance_test": null
+  },
+  "claim_boundary": "Supervised patch-level image classification only; no clinical or patient-level claims."
+}
