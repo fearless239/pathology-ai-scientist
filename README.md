@@ -1,46 +1,128 @@
-# Pathology-AI-Scientist
+<div align="center">
+  <img src="docs/assets/pathology-ai-scientist.png" alt="Pathology-AI-Scientist" width="100%" />
+  <h1>Pathology-AI-Scientist</h1>
+  <p><b>An end-to-end AI research agent specialized for computational pathology.</b></p>
+  <p>
+    <a href="README.md">English</a> |
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
+  <p>
+    <a href="https://github.com/fearless239/pathology-ai-scientist/actions/workflows/ci.yml"><img src="https://github.com/fearless239/pathology-ai-scientist/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12-3776AB" alt="Python 3.11 | 3.12" />
+    <img src="https://img.shields.io/badge/version-0.1.0--beta-orange" alt="Version 0.1.0 beta" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-AI%20Scientist%20Source%20Code%20License-blue" alt="AI Scientist Source Code License" /></a>
+  </p>
+  <p>
+    <a href="#quick-start">Quick Start</a> ·
+    <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+    <a href="docs/CASE_STUDY.md">Case Study</a> ·
+    <a href="#documentation">Documentation</a>
+  </p>
+</div>
 
-![Pathology-AI-Scientist — an end-to-end research-agent framework for computational pathology](docs/assets/pathology-ai-scientist.png)
+Pathology-AI-Scientist is an end-to-end research-agent framework built on
+[**AI-Scientist-v2**](https://github.com/SakanaAI/AI-Scientist-v2) and specialized for pathology AI
+research. It carries a research direction through experiment design, code generation, execution,
+evaluation, evidence collection, and manuscript production within one controlled workflow.
 
-**An auditable, end-to-end research-agent framework for computational pathology, with PathMNIST as its first reference implementation.**
+Many open AI-scientist frameworks present compelling general ideas, but deliberately remain open-ended:
+they do not encode the dataset interfaces, evaluation rules, evidence requirements, and operational
+controls needed for a concrete scientific domain. Pathology-AI-Scientist turns that general agentic
+research paradigm into an executable workflow for computational pathology through:
 
-Pathology-AI-Scientist coordinates long-running research tasks across LLMs, datasets, generated code, Docker,
-GPU experiments, evidence validation, and manuscript tooling. Its central feature is not autonomous
-paper writing: it is knowing what ran, what it cost, what evidence supports each result, and when the
-system must stop for human approval.
+- **Pathology-task specialization** for the structure and lifecycle of medical-image research.
+- **Dataset adaptation** with explicit discovery, fingerprinting, split isolation, and test protection.
+- **Scientific-rigor adaptation** with reproducible experiments, candidate freezing, trusted metrics,
+  evidence provenance, and independent acceptance.
+- **End-to-end agent execution** spanning research intent, experiments, analysis, and manuscript artifacts.
 
-> **Status:** `v0.1.0-beta`, advanced research prototype. This repository is **source-available** under
-> the restricted AI Scientist Source Code License; it is not OSI open source. It is not a medical device,
-> clinical evidence, medical advice, or an autonomous deployment system.
+PathMNIST is the first supported reference dataset in the current beta release.
 
-![Path-AI Scientist local Streamlit research workspace](docs/assets/path-ai-scientist-demo.png)
+> **Note:**
+> This repository is a `v0.1.0-beta` advanced research prototype. Its current validation boundary is
+> documented in the [release verification record](docs/BETA_RELEASE_VALIDATION.md). Demo and mocked-test
+> success do not constitute a new live-provider or sealed-test research run.
 
-### Beta verification boundary
+> **Caution!**
+> Full Research Mode executes LLM-generated code. Run it only inside the provided restricted Docker
+> environment and review every human-approval boundary. This software is not a medical device, clinical
+> evidence, medical advice, or an autonomous clinical deployment system.
 
-This release preserves the existing research implementation, dependency versions, and upstream
-patches. Release preparation revalidates existing archived evidence and runs offline regressions;
-it does not rerun paid research or the sealed test. A passing Demo or mocked test is not a new
-real-service end-to-end run. The newer `upstream_v2` publication backend has separate offline
-coverage; an older archived task does not prove that backend completed a live research task.
-See [the release verification record](docs/BETA_RELEASE_VALIDATION.md) for measured results and
-remaining release gates, and [publication validation limits](docs/UPSTREAM_PUBLICATION.md).
+## Table of Contents
 
-## See it in five minutes
+1. [Requirements](#requirements)
+   - [Installation](#installation)
+   - [Provider Configuration](#provider-configuration)
+2. [Quick Start](#quick-start)
+3. [Run a Pathology AI Research Task](#run-a-pathology-ai-research-task)
+4. [Research Workflow](#research-workflow)
+5. [Extending to New Datasets](#extending-to-new-datasets)
+6. [Development and Verification](#development-and-verification)
+7. [Frequently Asked Questions](#frequently-asked-questions)
+8. [Documentation](#documentation)
+9. [Acknowledgement](#acknowledgement)
+10. [License and Responsible Use](#license-and-responsible-use)
 
-The deterministic Demo Mode needs no dataset, GPU, API key, or network call after the image is built.
-It demonstrates the control surface using explicitly synthetic fixture metrics. On Windows, this
-project supports Docker Engine installed directly inside Ubuntu WSL 2; Docker Desktop is optional.
+## Requirements
+
+The deterministic Demo Mode runs on Python 3.11 or 3.12 and does not require a dataset, GPU, or API key.
+Full Research Mode requires:
+
+- Python 3.11 or 3.12
+- Docker
+- Suitable compute for the selected experiment
+- A verified supported dataset
+- An explicitly authorized OpenAI-compatible provider
+
+### Installation
+
+Clone the repository and install the required feature set:
+
+```bash
+git clone https://github.com/fearless239/pathology-ai-scientist.git
+cd pathology-ai-scientist
+python -m venv .venv
+
+# PowerShell: .\.venv\Scripts\Activate.ps1
+# WSL/Linux: source .venv/bin/activate
+
+python -m pip install -e ".[ui]"
+```
+
+For Full Research Mode, install the research, paper, and training dependencies:
+
+```bash
+python -m pip install -e ".[agent,ui,paper,training]"
+```
+
+### Provider Configuration
+
+The framework reads `PARATERA_API_KEY` only from the process environment. `.env.example` documents the
+supported variables, but never commit a populated `.env`.
+
+Provider availability and nominal prices can change. Verify both before authorizing a paid run.
+
+## Quick Start
+
+The fastest way to explore the framework is the deterministic Demo Mode. It uses explicitly synthetic
+fixture metrics and makes no network call after the Docker image is built.
 
 ```bash
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:8501>. The UI walks through research intent, the transactional Agent state graph,
-research-contract approval, tool/budget/retry controls, trusted metrics, evidence provenance, and the
-independent acceptance report.
+Open <http://127.0.0.1:8501>.
 
-Run Docker commands in the environment that owns the Docker Engine. For this repository's validated
-Windows setup, enter `Ubuntu-24.04` and build from the Windows checkout with:
+![Pathology-AI-Scientist local Streamlit research workspace](docs/assets/path-ai-scientist-demo.png)
+
+The interface demonstrates research intent, the transactional Agent state graph, research-contract
+approval, tool/budget/retry controls, trusted metrics, evidence provenance, and independent acceptance.
+
+<details>
+<summary><b>Windows with Docker Engine in WSL 2</b></summary>
+
+Run Docker commands in the environment that owns the Docker Engine. For the validated Windows setup,
+enter `Ubuntu-24.04` and build from the Windows checkout:
 
 ```bash
 cd <WSL-PATH-TO-REPOSITORY>
@@ -48,118 +130,46 @@ bash scripts/build-demo-wsl.sh . path-ai-scientist-demo:local
 bash scripts/verify-docker.sh path-ai-scientist-demo:local
 ```
 
-See [Docker on Windows with WSL 2](docs/DOCKER_WSL.md) for UI launch commands, PowerShell invocation,
-and the `xattr ... permission denied` workaround. A clean clone stored directly in the WSL Linux
-filesystem can use `docker compose up --build` normally.
+See [Docker on Windows with WSL 2](docs/DOCKER_WSL.md) for launch commands, PowerShell invocation, and
+the `xattr ... permission denied` workaround.
 
-Without Docker, use Python 3.11 or 3.12:
+</details>
+
+<details>
+<summary><b>Run the Demo without Docker</b></summary>
 
 ```bash
-python -m venv .venv
-# PowerShell: .\.venv\Scripts\Activate.ps1
-# WSL/Linux: source .venv/bin/activate
-python -m pip install -e ".[ui]"
 path-ai-scientist-demo --output .demo/pathmnist-offline
 PATH_SCIENTIST_DEMO=1 python -m streamlit run app.py
 ```
 
-In PowerShell, use
-`$env:PATH_SCIENTIST_DEMO="1"; python -m streamlit run app.py` for the final command.
+In PowerShell:
 
-## Why a research Agent is harder than a chat Agent
-
-A plausible answer is not enough. A research workflow must survive restarts, isolate the test set,
-account for provider cost, execute untrusted generated code, distinguish model claims from measured
-results, and refuse publication when evidence is incomplete. Pathology-AI-Scientist implements these as system
-invariants rather than prompt suggestions.
-
-```mermaid
-flowchart LR
-  Q[Research direction] --> D[Dataset adapter\nfingerprint + split isolation]
-  D --> C[Research contract]
-  C -->|human approval| E[Agent experiment search]
-  E --> S[No-network, non-root\nDocker runner]
-  S --> F[Candidate freeze]
-  F -->|human approval| T[One-time sealed test]
-  T --> P[Trusted metrics +\nfigure provenance]
-  P --> W[Writer / reviewer]
-  W --> A[Independent acceptance]
-  A -->|pass| R[Evidence archive]
-  A -->|fail| X[Failure diagnosis]
+```powershell
+$env:PATH_SCIENTIST_DEMO="1"; python -m streamlit run app.py
 ```
 
-Every formal transition follows:
+</details>
 
-```text
-validate inputs → perform work → validate outputs → commit task state
-```
+## Run a Pathology AI Research Task
 
-A tool returning successfully does not make a stage complete. Missing manifests, untrusted statistics,
-invalid references, exhausted budgets, or a violated test policy stop the workflow.
+Obtain PathMNIST from the official MedMNIST distribution (DOI `10.5281/zenodo.10519652`), retain its
+attribution, and keep `pathmnist_64.npz` outside Git.
 
-## Engineering highlights
-
-- **Durable orchestration:** transactional state, bounded retries, rollback, resume, and idempotent
-  response reuse.
-- **Human-in-the-loop control:** separate approvals for the research contract, paid calls, sealed test,
-  and PDF build.
-- **Safe generated code:** non-root Docker execution, no network, restricted mounts, and no API key in
-  the experiment environment.
-- **Cost governance:** request reservation, persistent task ledger, stable request IDs, and a hard ceiling.
-- **Scientific integrity:** split isolation, candidate freeze, one-time test evaluation, repeat requirements,
-  trusted statistics, and complete result reporting.
-- **Evidence provenance:** dataset, code, execution, metric, figure, claim, and archive hashes remain
-  machine-checkable.
-- **Independent acceptance:** a deterministic validator—not the paper writer—decides whether an output
-  may be described as a formal research artifact.
-
-## PathMNIST case study
-
-The curated reference case demonstrates a frozen SmallResNet evaluation across three seeds. It records
-test Macro-F1 `0.834035 ± 0.075947`, validation/test comparison, per-seed results, and the provenance
-needed to reproduce the report. The case is presented as a framework demonstration rather than a
-state-of-the-art or clinical claim.
-
-Read [the case study](docs/CASE_STUDY.md) or inspect the
-[de-identified evidence bundle](examples/pathmnist-case-study/README.md). The generated manuscript is a
-non-core, visibly non-peer-reviewed sample; the acceptance report and evidence manifest are the source
-of truth.
-
-## Framework extension boundary
-
-`pathmnist.framework` exposes beta `Protocol` contracts:
-
-```python
-from pathlib import Path
-from pathmnist.dataset_adapter import DatasetAdapter as GenericImageDatasetAdapter
-
-adapter = GenericImageDatasetAdapter(seed=7)
-profile = adapter.discover(Path("my_dataset"), Path("dataset_profile.json"))
-print(profile.content_sha256, profile.split_counts)
-```
-
-- `DatasetAdapter`: discover, describe, fingerprint, and isolate dataset splits.
-- `ExperimentBackend`: preflight, run experiments, freeze a candidate, and evaluate the sealed test.
-- `ArtifactValidator`: validate manifests, trusted metrics, figures, references, and disclosures.
-- `ResearchTaskConfig`: provider-neutral intent, adapter, budget, roles, permissions, and output root.
-
-PathMNIST is the only complete reference adapter in beta. These interfaces document the intended
-extension seam but are not guaranteed stable before 1.0.
-
-## Full Research Mode
-
-Full mode requires a verified PathMNIST-64 archive, Docker, suitable compute, and an explicitly
-authorized OpenAI-compatible provider. Obtain PathMNIST from the official MedMNIST distribution
-(DOI `10.5281/zenodo.10519652`), retain its attribution, and keep `pathmnist_64.npz` outside Git.
+Create a task with a high-level pathology research direction:
 
 ```bash
-python -m pip install -e ".[agent,ui,paper,training]"
-path-ai-scientist init --task-id TASK --dataset-path pathmnist_64.npz --direction "..."
+path-ai-scientist init \
+  --task-id TASK \
+  --dataset-path pathmnist_64.npz \
+  --direction "Describe the pathology AI research direction"
+
 path-ai-scientist run --task-id TASK
 path-ai-scientist status --task-id TASK
 ```
 
-The orchestrator stops at authorization boundaries. Continue only after inspecting status and cost:
+The orchestrator stops at explicit authorization boundaries. Inspect the current state and cost before
+continuing:
 
 ```bash
 path-ai-scientist approve-contract --task-id TASK
@@ -170,30 +180,79 @@ path-ai-scientist run --task-id TASK --allow-paid
 path-ai-scientist run --task-id TASK --allow-pdf
 ```
 
-Only `PARATERA_API_KEY` is read, and only from the process environment. `.env.example` lists supported
-variables, but never commit a populated `.env`. Provider catalog and nominal prices must be verified
-before a paid run.
-
 The former 24-stage workflow remains compatibility/regression code only. It is not shown in the main UI,
 cannot grant formal acceptance, and is not a public control plane.
 
-## Specialization versus AI-Scientist-v2
+## Research Workflow
 
-| Concern | AI-Scientist-v2 upstream | Pathology-AI-Scientist specialization |
-|---|---|---|
-| Agent search | AgentManager, MinimalAgent, journals | Pathology contract and controlled transitions |
-| Dataset | Generic experiment assumptions | Fingerprints, group/split checks, physical research/test views |
-| Generated code | Agent-managed experiments | No-network, non-root runner and execution receipts |
-| Test policy | No local sealed-test authority | Frozen candidate, durable approval, one-time evaluation |
-| Evidence | Journals and generated reports | Trusted statistics, manifests, hashes, claim constraints |
-| Cost | Provider calls | Reservation ledger and hard task budget |
-| Publication | Writer/reviewer concepts | Figure/reference/disclosure/PDF gates and failure diagnosis |
+Pathology-AI-Scientist adapts the open-ended AI-scientist loop to the controls required by a concrete
+pathology research task:
 
-The upstream snapshot and existing local patches are retained under `vendor/AI-Scientist-v2`.
-`UPSTREAM_MANIFEST.sha256` records the original baseline, not the patched tree. See [architecture](docs/ARCHITECTURE.md) and
-[source provenance](docs/SOURCE_PROVENANCE.md).
+```mermaid
+flowchart TB
+  subgraph PHASE1["1 · Research Definition"]
+    direction LR
+    Q[Pathology AI<br/>research direction] --> D[Dataset discovery<br/>and validation<br/>fingerprint + split isolation]
+    D --> R[Research understanding<br/>and literature search<br/>idea generation]
+    R --> C[Research contract<br/>generation]
+  end
 
-## Development and verification
+  subgraph PHASE2["2 · Experimental Research"]
+    direction LR
+    P[Experiment specification<br/>validation + sandbox preflight] --> E[Agentic experimentation<br/>baseline + tuning + innovation + ablation]
+    E --> S[Candidate selection<br/>and freeze]
+  end
+
+  subgraph PHASE3["3 · Independent Testing"]
+    direction LR
+    T[One-time<br/>sealed test] --> I{Evidence<br/>integrity check}
+    I -->|pass| A[Result analysis<br/>and figure generation]
+    I -->|fail| X[Failure diagnosis]
+  end
+
+  subgraph PHASE4["4 · Publication and Acceptance"]
+    direction LR
+    W[Manuscript<br/>generation] --> V[Independent review<br/>and revision]
+    V --> L[Chinese translation<br/>and PDF build]
+    L --> Z[Evidence archive<br/>and final acceptance]
+  end
+
+  C -->|human approval| P
+  S -->|independent test approval| T
+  A --> W
+```
+
+Every formal transition follows:
+
+```text
+validate inputs → perform work → validate outputs → commit task state
+```
+
+A successful tool call does not complete a research stage. Missing manifests, untrusted statistics,
+invalid references, exhausted budgets, or a violated test policy stop the workflow.
+
+## Extending to New Datasets
+
+The current beta provides one complete reference adapter. New pathology datasets can be integrated through
+the beta contracts exposed by `pathmnist.framework`:
+
+```python
+from pathlib import Path
+from pathmnist.dataset_adapter import DatasetAdapter as GenericImageDatasetAdapter
+
+adapter = GenericImageDatasetAdapter(seed=7)
+profile = adapter.discover(Path("my_dataset"), Path("dataset_profile.json"))
+print(profile.content_sha256, profile.split_counts)
+```
+
+- `DatasetAdapter`: dataset discovery, description, fingerprinting, and split isolation.
+- `ExperimentBackend`: preflight, experiment execution, candidate freeze, and sealed-test evaluation.
+- `ArtifactValidator`: validation of manifests, trusted metrics, figures, references, and disclosures.
+- `ResearchTaskConfig`: provider-neutral intent, adapter, budget, roles, permissions, and output root.
+
+These interfaces define the intended extension seam but are not guaranteed stable before 1.0.
+
+## Development and Verification
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -205,35 +264,54 @@ path-ai-scientist-demo --output .demo/first
 path-ai-scientist-demo --output .demo/second
 ```
 
-The two demo manifests must contain identical artifact hashes. Pull-request CI runs Python 3.11 and
-3.12 checks, offline fixture acceptance, the release boundary, and Docker construction. GPU and paid
-provider smoke tests are intentionally manual.
+The two Demo manifests must contain identical artifact hashes. Pull-request CI runs Python 3.11 and 3.12
+checks, offline fixture acceptance, release-boundary checks, and Docker construction. GPU and paid-provider
+smoke tests remain intentionally manual.
 
-## Known limitations
+## Frequently Asked Questions
 
-- The validated example is PathMNIST patch classification, not whole-slide imaging.
-- A three-seed benchmark is not external replication or clinical validation.
-- Generated manuscripts require qualified human review and are not publication ready by default.
-- Upstream `AgentManager` recovery still uses task-owned pickle state; replacing it is P1 work.
-- Docker/WSL onboarding is heavier than a hosted demo, which this beta intentionally omits.
-- Provider availability and nominal prices can change and must be checked before use.
+### Do I need a GPU or an API key?
+
+Not for deterministic Demo Mode. Full Research Mode requires compute appropriate for the experiment and
+an explicitly authorized compatible provider.
+
+### Does a successful Demo prove the full live research pipeline works?
+
+No. Demo Mode uses synthetic fixtures. Mocked and offline checks validate framework behavior but do not
+constitute a new paid-provider, GPU, sealed-test, or publication run.
+
+### Can this system be used for diagnosis or clinical decisions?
+
+No. It is a research prototype, not a medical device or clinical evidence. Outputs require qualified
+human review and independent validation.
+
+### Which datasets are supported?
+
+PathMNIST is the first complete reference adapter in the current beta. The framework contracts are intended
+to support additional pathology datasets over time.
 
 ## Documentation
 
+- [Architecture](docs/ARCHITECTURE.md)
 - [Engineering deep dive](docs/ENGINEERING_DEEP_DIVE.md)
 - [Case study](docs/CASE_STUDY.md)
+- [Release verification](docs/BETA_RELEASE_VALIDATION.md)
 - [Docker on Windows with WSL 2](docs/DOCKER_WSL.md)
-- [Architecture](docs/ARCHITECTURE.md), [beta audit](docs/BETA_AUDIT.md), and
-  [release checklist](docs/RELEASE_CHECKLIST.md)
-- [Contributing](CONTRIBUTING.md), [security](SECURITY.md), and
-  [third-party notices](THIRD_PARTY_NOTICES.md)
+- [Contributing](CONTRIBUTING.md), [security](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md)
 
-## License and responsible use
+## Acknowledgement
+
+Pathology-AI-Scientist is built on [AI-Scientist-v2](https://github.com/SakanaAI/AI-Scientist-v2).
+The upstream snapshot and retained local patches are stored under `vendor/AI-Scientist-v2`.
+`UPSTREAM_MANIFEST.sha256` records the original baseline. See [source provenance](docs/SOURCE_PROVENANCE.md)
+for details.
+
+## License and Responsible Use
 
 This derivative repository retains the **AI Scientist Source Code License**, including restricted-use
-conditions. It must not be described as MIT-, Apache-, BSD-, or OSI-licensed. Review [LICENSE](LICENSE)
+conditions. It is source-available, not MIT-, Apache-, BSD-, or OSI-licensed. Review [LICENSE](LICENSE)
 and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistribution.
 
-Generated reports must retain prominent AI-generation disclosure. Do not use this software or its
-outputs for diagnosis, treatment decisions, autonomous clinical deployment, or claims unsupported by
-qualified human review and independently validated evidence.
+Generated reports must retain prominent AI-generation disclosure. Do not use this software or its outputs
+for diagnosis, treatment decisions, autonomous clinical deployment, or claims unsupported by qualified
+human review and independently validated evidence.
