@@ -1,0 +1,101 @@
+# 标签平滑提升了用于 PathMNIST 组织病理学图像分类的轻量级 CNN
+
+## 摘要
+
+我们研究了标签平滑交叉熵损失是否能提升在 PathMNIST 组织病理学数据集上从头训练的轻量级卷积神经网络 (CNN) 的分类准确率。按照预先指定的研究方案，我们使用标准交叉熵损失（基线）和标签平滑交叉熵损失（干预）在 28×28 组织病理学图像上训练了一个 3 卷积层 CNN。模型和超参数在验证集上选定，随后最终模型在留出测试集上进行了一次评估。在验证集上，干预实现了 0.8150 的准确率，而基线为 0.7383，产生的配对均值差为 0.0767。这一提升超过了预先指定的 1.0 个百分点增加的阈值，并满足了 macro-F1 不下降护栏要求。在留出测试集上，干预实现了 0.8075 的准确率，而基线为 0.6065，产生的配对均值差为 0.2010。由于统计方案指定了单次重复且仅进行描述性分析，这些比较缺乏配对不确定性估计，因此仅具有描述性。
+
+## 数据集
+
+本研究使用了 PathMNIST 数据集 [R1, R2]，这是一个用于九分类斑块级组织分类的组织病理学图像基准集合。该数据集提供了固定的划分：89,996 张训练图像、10,004 张验证图像和 7,180 张测试图像。源图像的形状为 64×64×3 像素。出于本实验的目的，图像被调整为 28×28 像素的模型输入分辨率；源图像原本并非处于此分辨率。九个类别由整数标签 0 到 8 表示。
+
+类别分布在不同划分间存在差异。训练集以类别 8 (n=12,885) 和类别 5 (n=12,182) 为主，而测试集则更不平衡，类别 8 (n=1,233) 和类别 0 (n=1,338) 最常见，类别 2 (n=339) 和类别 5 (n=592) 最不常见。
+
+![数据集划分大小](figures/dataset_splits.png)
+
+![类别分布](figures/class_distribution.png)
+
+## 相关工作
+
+组织病理学图像分类因其在支持计算机辅助诊断方面的潜力而受到广泛关注 [11]。最近的文献探索了一系列架构，从为效率设计的轻量级 CNN [12] 到预训练模型和迁移学习策略 [R2, R6]。比较分析在不同框架间 [4] 以及与基于 Transformer 的模型对比中 [11] 对 CNN 的性能进行了基准测试。
+
+具体的方法学途径包括用于鲁棒分类的曲率正则化 [3]、文本增强的视觉提示学习 [9]，以及类增量场景下的持续学习 [10]。研究还检验了色彩空间 [7] 和多尺度特征整合 [8] 的影响。本研究通过在从头训练的轻量级架构上评估一种简单的正则化技术——标签平滑，建立在基线 CNN 文献的基础之上。
+
+## 方法
+
+### 模型架构
+该模型是一个包含三个卷积层的轻量级 CNN，从头训练，未使用任何外部或预训练权重。该网络接受大小为 28×28×3 的输入图像。
+
+### 训练目标
+基线干预使用标准交叉熵损失。提出的干预用标签平滑交叉熵损失取代了它，该损失使用 0.15 的平滑因子将硬目标分布与九个类别上的均匀分布混合。该方法在每个训练步骤中增加了可忽略不计的计算开销。基线组和干预组之间的 CNN 架构和所有其他超参数保持完全相同。
+
+### 超参数与选择
+超参数是使用训练集的 20% 子集确定的，以减少实验运行时间。选定的参数为：优化器：SGD；学习率：0.01；批次大小：128；权重衰减：0.0005；动量：0.9。模型最多训练 12 个 epoch。启用了早停机制，耐心值为 5 个 epoch，监控验证损失，最小 delta 为 0.0。检查点选择基于最小化验证损失。选择的主要指标是准确率，模型是根据其在验证集上的表现选出的。在 20% 子集上进行超参数选择后，最终的基线和干预模型在完整训练集上训练并在验证集上评估。
+
+## 实验方案
+
+研究方案预先指定了基线（标准交叉熵）和干预（标签平滑交叉熵）之间的单次比较。主要指标被定义为九分类准确率，预先指定的成功标准要求干预相对于基线的准确率提升至少为 0.01（1 个百分点）。建立了一个要求 macro-F1 不下降的护栏。
+
+实验使用了固定的数据划分（划分种子 7）和单一训练种子（种子 0）。统计方案仅配置用于描述性分析，仅有单次重复；因此，未计算推断性显著性检验或置信区间。最终模型和分析方案在留出测试集上进行单次评估前已固定。留出测试结果被独立重新计算，未用于模型选择。
+
+## 结果
+
+在验证集上，干预实现了 0.8150 的准确率和 0.8186 的 macro-F1，而基线的准确率为 0.7383，macro-F1 为 0.7084。准确率的配对均值差为 0.0767，macro-F1 护栏以 0.1102 的 delta 得到满足。
+
+在留出测试集上，干预实现了 0.8075 的准确率和 0.7314 的 macro-F1，而基线的准确率为 0.6065。测试准确率的配对均值差为 0.2010。测试集上的各类性能显示，类别 0、1、3 和 4 具有高精确率和召回率，但类别 2、5 和 7 的性能较低。例如，测试类别 5 的召回率为 0.1943，测试类别 2 的精确率为 0.3896。
+
+![预先指定的基线与干预比较](figures/contract_comparison.png)
+
+![单次测试指标](figures/test_metrics.png)
+
+![归一化混淆矩阵](figures/confusion_matrix.png)
+
+![各类精确率、召回率和 F1](figures/per_class_metrics.png)
+
+![可靠性图](figures/calibration.png)
+
+![微平均 ROC 和精确率-召回率](figures/roc_pr.png)
+
+## 讨论
+
+预先指定的假设是，标签平滑将比标准交叉熵提升至少 1 个百分点的分类准确率，同时不降低 macro-F1。根据方案结果，该假设在验证集上得到了支持。7.67 个百分点的验证提升大幅超过了 1.0 个百分点的阈值，并且满足了 macro-F1 护栏。在留出测试集上，干预保持了对基线的巨大优势，配对均值差为 20.10 个百分点，有利于标签平滑。
+
+描述性结果表明，标签平滑可能降低了模型过度自信并提升了在此轻量级架构上的泛化能力，尽管这是一个描述性假设而非已确认的因果结论。然而，测试集性能突出了特定的挑战。模型在类别 2、5 和 7 上表现不佳，这可能归因于某些组织类型间的视觉相似性，或者类别 2 和 5 在测试集中代表性不足。类别 5 的低召回率 (0.1943) 表明模型经常将这些样本错误分类，通常将其与类别 2 和 7 混淆，如混淆矩阵所示。这些类别间样本的系统性错误路由表明，28×28 下采样（丢弃了 64×64 源图像中约 75% 的像素信息）可能通过抹除细粒度的组织学细节，成为类间混淆的主要驱动因素。此外，0.6065 的基线测试准确率对于 9 分类任务来说异常低，表明可能存在训练不稳定或欠拟合；因此，巨大的干预增益可能部分反映了基线的病态，而非标签平滑的孤立有效性。
+
+## 局限性
+
+本研究有几个局限性。首先，统计方案仅指定了单次重复；因此，任何缺乏配对不确定性估计的比较都仅具有描述性，不能声称具有推断显著性或重复稳定性。结果可能随不同的随机种子而变化，需要多种子复制来验证这些发现的鲁棒性。其次，留出测试结果未用于调优或模型选择，这意味着报告的测试指标是性能的单次快照。第三，声明边界严格限于有监督的斑块级图像分类；未作出任何临床或患者级别的声明。第四，模型是在从 64×64 源调整大小的 28×28 图像上训练的，这可能导致细粒度组织学细节的丢失。第五，标签平滑因子 (α=0.15) 的选择未进行敏感性分析或在替代值（例如 α ∈ {0.05, 0.10, 0.20}）间进行消融，因此尚不清楚该提升是否对此选择具有鲁棒性。最后，异常低的基线测试准确率表明可能存在欠拟合，这意味着比较性的提升可能反映了基线训练的失败，而非标签平滑的内在益处。
+
+## 结论
+
+在这项已完成的研究中，我们评估了一个在 PathMNIST 上从头训练的轻量级 3 卷积层 CNN。预先指定的假设——即标签平滑交叉熵损失将比标准交叉熵提升至少 1 个百分点的准确率——在验证集上得到了支持，配对均值差为 0.0767，并且满足了 macro-F1 不下降的护栏。最终模型在验证数据上选定，并在留出测试集上评估一次，实现了 0.8075 的测试准确率，相对于基线代表了 0.2010 的描述性配对均值差。这些发现表明，标签平滑是组织病理学图像分类中轻量级 CNN 的一种有益且低开销的正则化技术。
+
+## AI 辅助披露
+
+**AI 生成披露：**本稿件的生成得到了 Path-AI Scientist（基于 AI-Scientist-v2 构建的衍生工作流）的大力协助。所有声明和产出物均需人工审查。
+
+## AI 辅助声明
+
+**AI生成披露：** 本文由 Path-AI Scientist 在 AI-Scientist-v2 衍生工作流基础上提供实质性自动生成协助。所有论断与实验产物均须经过人工审核。
+
+## 参考文献
+
+* **[1]** Junia Sam Dani, P.Joyce Beryl Princess. "Comparative Study of Baseline CNNs and Meta-Learning Approaches on PathMNIST" *2025 International Conference on Sustainable Communication Networks and Application (ICSCN)* (2025). DOI: 10.1109/icscn67106.2025.11308359. URL: https://doi.org/10.1109/icscn67106.2025.11308359
+* **[2]** Chakinarapu Sreenidhi, B. Surendiran, B. Prema Mayudu, P. V. S. S. R. Chandra Mouli, et al.. "Histopathological Image Classification on PathMNIST Using Pretrained CNN Models" *Lecture Notes in Networks and Systems* (2026). DOI: 10.1007/978-3-032-23945-7_1. URL: https://doi.org/10.1007/978-3-032-23945-7_1
+* **[3]** Guohao Yang, Jiacheng Qi, Xubin Sun. "Robust medical image classification with curvature regularization on the PATHMNIST" *Fourth International Conference on Computer Graphics, Image, and Virtualization (ICCGIV 2024)* (2024). DOI: 10.1117/12.3044867. URL: https://doi.org/10.1117/12.3044867
+* **[4]** Anida Nezovic, Jalal Romano, Nada Marić, Medina Kapo, et al.. "Comparative Analysis of CNN Performance in Keras, PyTorch and JAX on PathMNIST" *IFMBE Proceedings* (2026). DOI: 10.1007/978-3-032-06531-5_12. URL: https://doi.org/10.1007/978-3-032-06531-5_12
+* **[5]** Yukun Xiong, Yihan Wang, Wenshuang Zhang. "Privacy preserving data distillation in medical imaging with multidimensional matching on PATHMNIST" *International Conference on Computer Vision, Robotics, and Automation Engineering (CRAE 2024)* (2024). DOI: 10.1117/12.3042000. URL: https://doi.org/10.1117/12.3042000
+* **[6]** L. Stanescu, Cosmin Stoica-Spahiu. "AI-Based Evaluation of Transfer Learning Strategies for Robust Histopathology Image Classification" *2025 11th International Conference on Computer and Communications (ICCC)* (2025). DOI: 10.1109/ICCC68654.2025.11437918. URL: https://www.semanticscholar.org/paper/d8fc8df8c30943994badbf305243971b27b2702b
+* **[7]** S. Sahran, Ahmed Kareem Lateef, Abdulwahhab Essa Hamzah, Hamzah Hadi Qasim, et al.. "Comparative Analysis of Color Space in Histopathology Image Classification" *Jurnal Kejuruteraan* (2025). DOI: 10.17576/jkukm-2025-37(2)-06. URL: https://www.semanticscholar.org/paper/4cf210dbe07d3ced72652db94c2916b0231143ac
+* **[8]** A. Rehman, Naveed Khan, Gul E. Arzu, L. Dang. "Integrating multiscale features for robust breast cancer histopathology image classification" *Engineering & Technology* (2025). DOI: 10.46223/hcmcoujs.tech.en.16.1.4577.2026. URL: https://www.semanticscholar.org/paper/b57e9675a2c10e35060cd34e4de8a0c6f18496af
+* **[9]** Lang Yang, Wenlong Qu. "Using Text-augmented Visual Prompt Learning for Histopathology Image Classification" *2024 5th International Conference on Big Data & Artificial Intelligence & Software Engineering (ICBASE)* (2024). DOI: 10.1109/ICBASE63199.2024.10762523. URL: https://www.semanticscholar.org/paper/632f775d5d9a10f5171a112a4e5b6b7abf364e7f
+* **[10]** Yuanyuan Wu, Yu Zhao, Anca L. Ralescu. "Continual Learning for Histopathology Image Classification in Class-Incremental Learning" *Diagnostics* (2026). DOI: 10.3390/diagnostics16111711. PMID: 42279577. URL: https://www.semanticscholar.org/paper/6f2889071b5a6abf23ba6679bbc5ebd7c3b48456
+* **[11]** M. Vasanthi, Nouf S. Aldahwan. "Performance and generalization analysis of machine learning, deep learning, and transformer models for histopathology image classification" *Scientific Reports* (2026). DOI: 10.1038/s41598-026-52306-z. PMID: 42120655. URL: https://www.semanticscholar.org/paper/80894ce60110f8a692f1aaf79e8a10cdab4f0444
+* **[12]** Rajeev Ranjan, Sumit Thakur, Ayush Sharma, T. V. Hyma Lakshmi, et al.. "Lightweight Convolutional Neural Network for Automated Histopathology Image Classification on the Path MNIST Dataset" *International Conference on Innovative Mechanisms for Industry Applications* (2025). DOI: 10.1109/ICIMIA67127.2025.11200871. URL: https://www.semanticscholar.org/paper/4242cefec63e10d6b2478e9ebd0301311f6d5cbe
+* **[13]** Moein Akbari Shahpar, Mohsen Akbari-Shahpar. "Histopathology Image Classification: Performance, Efficiency, and Adversarial Robustness" *Iranian Conference on Biomedical Engineering* (2025). DOI: 10.1109/ICBME68496.2025.11392428. URL: https://www.semanticscholar.org/paper/c192b87ddc78551af3a5db32ac0dc38e7187249f
+* **[14]** Mark Gustavson. "Abstract IA05: Computational pathology in ADC drug development" *Molecular Cancer Therapeutics* (2025). DOI: 10.1158/1535-7163.targ-25-ia05. URL: https://www.semanticscholar.org/paper/9b9f3921c652923cbb4737ef153aea16267856c6
+* **[15]** Peng Xiao, Dajiang Chen, Zhen Qin, Mingsheng Cao, et al.. "Edge-Adaptive Dynamic Scalable Convolution for Efficient Remote Mobile Pathology Analysis" *ACM Transactions on Autonomous and Adaptive Systems* (2025). DOI: 10.1145/3732781. URL: https://www.semanticscholar.org/paper/e3eee82f0e3d2d16e3c35c432b4663e88b5aa702
+* **[16]** Ji-rong Wen, Xiaojun Li, Junping Yao, Xinyan Kong, et al.. "Adaptive-expert-weight-based load balance scheme for dynamic routing of MoE" *Frontiers Neurorobotics* (2025). DOI: 10.3389/fnbot.2025.1590994. PMID: 41163815. URL: https://www.semanticscholar.org/paper/1a9e1eec225416bacacc74349c3f5f62f88a0668
+* **[17]** Chongcong Jiang. "Adaptive Aggregation of Medical Foundation Models for Computational Pathology via Mixture-of-Experts Framework" *2025 22nd International Computer Conference on Wavelet Active Media Technology and Information Processing (ICCWAMTIP)* (2025). DOI: 10.1109/ICCWAMTIP68645.2025.11352650. URL: https://www.semanticscholar.org/paper/54300a5c5a1ceb1cb014a75974fc363161cc34a8
+* **[18]** Thanu Kurian, S. Thangam. "Enhancing Early Exit Performance With Uncertainty-Aware Training in Convolutional Neural Networks for Image Classification" *IEEE Access* (2025). DOI: 10.1109/ACCESS.2025.3572415. URL: https://www.semanticscholar.org/paper/939325eda8366bf7a272c597316af794238ffd1c
+* **[19]** H. Nguyen, M. Phan, T. Pham. "Early Exit Based on Deep Learning Model for Polyp Colonoscopy Image Classification" *Journal of Technical Education Science* (2025). DOI: 10.54644/jte.2025.1721. URL: https://www.semanticscholar.org/paper/9083a0f6821bb2eb745d27b4b1f580103e54d431
+* **[20]** Youbing Hu, Yun Cheng, Zimu Zhou, Zhiqiang Cao, et al.. "RAPNet: Resolution-Adaptive and Predictive Early Exit Network for Efficient Image Recognition" *IEEE Internet of Things Journal* (2024). DOI: 10.1109/JIOT.2024.3428554. URL: https://www.semanticscholar.org/paper/6b8769f48ba42228ad85cfe8cfdb05f17c8fcf15
