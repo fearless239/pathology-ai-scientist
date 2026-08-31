@@ -1,8 +1,10 @@
-# Path-AI Scientist
+# Pathology-AI-Scientist
 
-**An auditable research-agent framework for computational pathology, with PathMNIST as its first reference implementation.**
+![Pathology-AI-Scientist — an end-to-end research-agent framework for computational pathology](docs/assets/pathology-ai-scientist.png)
 
-Path-AI Scientist coordinates long-running research tasks across LLMs, datasets, generated code, Docker,
+**An auditable, end-to-end research-agent framework for computational pathology, with PathMNIST as its first reference implementation.**
+
+Pathology-AI-Scientist coordinates long-running research tasks across LLMs, datasets, generated code, Docker,
 GPU experiments, evidence validation, and manuscript tooling. Its central feature is not autonomous
 paper writing: it is knowing what ran, what it cost, what evidence supports each result, and when the
 system must stop for human approval.
@@ -68,7 +70,7 @@ In PowerShell, use
 
 A plausible answer is not enough. A research workflow must survive restarts, isolate the test set,
 account for provider cost, execute untrusted generated code, distinguish model claims from measured
-results, and refuse publication when evidence is incomplete. Path-AI Scientist implements these as system
+results, and refuse publication when evidence is incomplete. Pathology-AI-Scientist implements these as system
 invariants rather than prompt suggestions.
 
 ```mermaid
@@ -177,7 +179,7 @@ cannot grant formal acceptance, and is not a public control plane.
 
 ## Specialization versus AI-Scientist-v2
 
-| Concern | AI-Scientist-v2 upstream | Path-AI Scientist specialization |
+| Concern | AI-Scientist-v2 upstream | Pathology-AI-Scientist specialization |
 |---|---|---|
 | Agent search | AgentManager, MinimalAgent, journals | Pathology contract and controlled transitions |
 | Dataset | Generic experiment assumptions | Fingerprints, group/split checks, physical research/test views |
