@@ -188,35 +188,9 @@ cannot grant formal acceptance, and is not a public control plane.
 Pathology-AI-Scientist adapts the open-ended AI-scientist loop to the controls required by a concrete
 pathology research task:
 
-```mermaid
-flowchart LR
-  subgraph DEFINE["Research Definition"]
-    direction TB
-    Q[Pathology AI<br/>research direction] --> D[Dataset validation<br/>fingerprint + split isolation]
-    D --> R[Research and ideation<br/>literature search]
-    R --> C[Research contract]
-  end
-
-  subgraph TEST["Experiment and Test"]
-    direction TB
-    P[Specification and<br/>sandbox preflight] --> E[Agent experiments<br/>baseline + tuning + innovation + ablation]
-    E --> S[Select and freeze<br/>candidate]
-    S -->|independent approval| T[One-time sealed test]
-    T --> I{Evidence complete?}
-  end
-
-  subgraph PUBLISH["Analysis and Publication"]
-    direction TB
-    A[Analysis and figures] --> W[Manuscript]
-    W --> V[Independent review]
-    V --> L[Translation and PDF]
-    L --> Z[Archive and<br/>final acceptance]
-  end
-
-  C -->|human approval| P
-  I -->|pass| A
-  I -->|fail| X[Failure diagnosis]
-```
+<div align="center">
+  <img src="docs/assets/pathology-ai-workflow-en.png" width="760" alt="Pathology AI research workflow" />
+</div>
 
 Every formal transition follows:
 

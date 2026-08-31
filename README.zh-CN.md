@@ -183,35 +183,9 @@ path-ai-scientist run --task-id TASK --allow-pdf
 
 Pathology-AI-Scientist 将开放式的 AI 科学家循环，适配为具体病理科研任务所需要的受控流程：
 
-```mermaid
-flowchart LR
-  subgraph DEFINE["研究定义"]
-    direction TB
-    Q[病理 AI 科研方向] --> D[数据集验证<br/>指纹 + 数据划分隔离]
-    D --> R[研究理解与想法生成<br/>文献检索]
-    R --> C[研究合同]
-  end
-
-  subgraph TEST["实验与测试"]
-    direction TB
-    P[实验规范与<br/>沙箱预检] --> E[智能体实验<br/>初始实现 + 调优 + 创新方法 + 消融]
-    E --> S[候选方案<br/>选择与冻结]
-    S -->|独立批准| T[一次性密封测试]
-    T --> I{证据是否完整？}
-  end
-
-  subgraph PUBLISH["分析与发布"]
-    direction TB
-    A[结果分析与图表] --> W[论文生成]
-    W --> V[独立审阅]
-    V --> L[中文翻译与 PDF]
-    L --> Z[证据归档与<br/>最终验收]
-  end
-
-  C -->|人工批准| P
-  I -->|通过| A
-  I -->|失败| X[失败诊断]
-```
+<div align="center">
+  <img src="docs/assets/pathology-ai-workflow-zh-CN.png" width="760" alt="病理 AI 科研工作流" />
+</div>
 
 每一次正式状态转换都遵循：
 
