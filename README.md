@@ -189,37 +189,33 @@ Pathology-AI-Scientist adapts the open-ended AI-scientist loop to the controls r
 pathology research task:
 
 ```mermaid
-flowchart TB
-  subgraph PHASE1["1 · Research Definition"]
-    direction LR
-    Q[Pathology AI<br/>research direction] --> D[Dataset discovery<br/>and validation<br/>fingerprint + split isolation]
-    D --> R[Research understanding<br/>and literature search<br/>idea generation]
-    R --> C[Research contract<br/>generation]
+flowchart LR
+  subgraph DEFINE["Research Definition"]
+    direction TB
+    Q[Pathology AI<br/>research direction] --> D[Dataset validation<br/>fingerprint + split isolation]
+    D --> R[Research and ideation<br/>literature search]
+    R --> C[Research contract]
   end
 
-  subgraph PHASE2["2 · Experimental Research"]
-    direction LR
-    P[Experiment specification<br/>validation + sandbox preflight] --> E[Agentic experimentation<br/>baseline + tuning + innovation + ablation]
-    E --> S[Candidate selection<br/>and freeze]
+  subgraph TEST["Experiment and Test"]
+    direction TB
+    P[Specification and<br/>sandbox preflight] --> E[Agent experiments<br/>baseline + tuning + innovation + ablation]
+    E --> S[Select and freeze<br/>candidate]
+    S -->|independent approval| T[One-time sealed test]
+    T --> I{Evidence complete?}
   end
 
-  subgraph PHASE3["3 · Independent Testing"]
-    direction LR
-    T[One-time<br/>sealed test] --> I{Evidence<br/>integrity check}
-    I -->|pass| A[Result analysis<br/>and figure generation]
-    I -->|fail| X[Failure diagnosis]
-  end
-
-  subgraph PHASE4["4 · Publication and Acceptance"]
-    direction LR
-    W[Manuscript<br/>generation] --> V[Independent review<br/>and revision]
-    V --> L[Chinese translation<br/>and PDF build]
-    L --> Z[Evidence archive<br/>and final acceptance]
+  subgraph PUBLISH["Analysis and Publication"]
+    direction TB
+    A[Analysis and figures] --> W[Manuscript]
+    W --> V[Independent review]
+    V --> L[Translation and PDF]
+    L --> Z[Archive and<br/>final acceptance]
   end
 
   C -->|human approval| P
-  S -->|independent test approval| T
-  A --> W
+  I -->|pass| A
+  I -->|fail| X[Failure diagnosis]
 ```
 
 Every formal transition follows:
