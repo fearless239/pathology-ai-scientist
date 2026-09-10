@@ -40,9 +40,10 @@ PathMNIST is the first supported reference dataset in the current beta release.
 > **Note:**
 > This repository is a `v0.1.0-beta` advanced research prototype. It distributes the executable
 > framework, required upstream assets, configuration, deployment helpers, and regression tests.
-> Historical experiment reports, generated papers, one-off recovery scripts, and private task evidence
-> are kept outside the source distribution. Demo and mocked-test success do not constitute a new
-> live-provider or sealed-test research run.
+> Raw experiment reports, generated-paper workspaces, one-off recovery scripts, and private task
+> evidence are kept outside the source distribution. A small number of explicitly documented,
+> redacted papers may be published under `docs/case-studies/` as workflow artifacts. Demo and
+> mocked-test success do not constitute a new live-provider or sealed-test research run.
 
 > **Caution!**
 > Full Research Mode executes LLM-generated code. Run it only inside the provided restricted Docker

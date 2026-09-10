@@ -19,9 +19,11 @@
 | validation | 524 |
 | test | 624 |
 
-默认把文件放在项目同级目录：
+默认把文件放在项目同级的 `datasets` 目录。例如，在 PowerShell 中可用以下命令得到路径：
 
-`C:\Users\asd\Desktop\autoresearch\datasets\pneumoniamnist.npz`
+```powershell
+Join-Path $env:USERPROFILE "Desktop\autoresearch\datasets\pneumoniamnist.npz"
+```
 
 数据不进入 Git 仓库。启动脚本会把项目同级的 `datasets` 目录只读挂载到网页容器的
 `/datasets`。若要使用其他宿主目录，请先在 WSL 中设置 `PATH_AI_DATASETS_DIR` 为对应的

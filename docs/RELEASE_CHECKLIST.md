@@ -6,7 +6,9 @@ Do not inherit a previous version's passing result without checking the affected
 ## Source boundary
 
 - [ ] Review the staged diff; retain only framework code, required assets, regression tests, and operational documentation.
-- [ ] Exclude datasets, weights, task state, provider responses, credentials, experiment logs, and generated papers.
+- [ ] Exclude datasets, weights, task state, provider responses, credentials, experiment logs, and
+      uncurated generated papers. A deliberately published case-study paper must live under
+      `docs/case-studies/`, include an evidence-boundary README and exclude private run artifacts.
 - [ ] Preserve the upstream license, notices, and patch provenance; describe the project as source-available.
 - [ ] Run `python -m pathmnist.release_check --repo .` against the tracked candidate.
 - [ ] Check README/documentation links and installation commands.

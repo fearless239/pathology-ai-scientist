@@ -16,10 +16,11 @@ the approved test-evaluation stage.
 ## Built-in adapter
 
 ```powershell
+$datasetPath = Join-Path $env:USERPROFILE "Desktop\autoresearch\datasets\pneumoniamnist.npz"
 path-ai-scientist init `
   --task-id pneumoniatest-001 `
   --dataset-adapter generic `
-  --dataset-path C:\Users\asd\Desktop\autoresearch\datasets\pneumoniamnist.npz `
+  --dataset-path $datasetPath `
   --budget-limit-usd 10 `
   --seed 7 `
   --direction "在 PneumoniaMNIST 官方划分上，从零训练相同的轻量级 CNN，比较普通交叉熵与仅加入训练集逆频率类别权重的加权交叉熵。以 macro-F1 为主指标，accuracy 和 weighted-F1 为次指标；固定 3 个随机种子进行配对训练，除 loss weighting 外保持模型、数据、优化器、学习率、batch size、epoch 上限和 early stopping 完全一致。不访问额外数据或预训练权重，在所有候选冻结后仅执行一次获批的密封测试，并如实报告正负结果与统计限制。"
