@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import math
 from pathlib import Path
@@ -8,6 +9,99 @@ from typing import Any
 
 class ManifestError(RuntimeError):
     pass
+
+
+MANIFEST_NORMALIZATION_MARKER = (
+    "# PATH_AI_MANIFEST_NORMALIZATION: primary_metric derived from approved contract"
+)
+
+
+def normalize_generated_manifest_fields(code: str, primary_metric: str) -> str:
+    """Normalize unambiguous generated manifest literals before any execution.
+
+    The approved contract is the sole source of the inserted value. A different
+    selection metric or a dynamic expression remains a hard failure rather than
+    being guessed or rewritten after training.
+    """
+    if not isinstance(primary_metric, str) or not primary_metric.strip():
+        raise ManifestError("Approved primary metric is missing")
+    tree = ast.parse(code)
+    insertions: list[int] = []
+    lines = code.splitlines(keepends=True)
+    offsets = []
+    offset = 0
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(
+            isinstance(target, ast.Name) and "manifest" in target.id.casefold()
+            for target in targets
+        ):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            continue
+        fields = {
+            key.value: value
+            for key, value in zip(node.value.keys, node.value.values)
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        selection = fields.get("selection_metric")
+        if selection is None:
+            continue
+        if not isinstance(selection, ast.Constant) or selection.value != primary_metric:
+            raise ManifestError(
+                "Generated experiment_manifest selection_metric must be the approved "
+                f"primary metric {primary_metric!r}"
+            )
+        declared = fields.get("primary_metric")
+        if declared is not None:
+            if not isinstance(declared, ast.Constant) or declared.value != primary_metric:
+                raise ManifestError(
+                    "Generated experiment_manifest primary_metric must equal the approved "
+                    f"metric {primary_metric!r}"
+                )
+            continue
+        start = offsets[node.value.lineno - 1] + node.value.col_offset
+        if start >= len(code) or code[start] != "{":
+            raise ManifestError("Cannot safely normalize generated experiment_manifest")
+        insertions.append(start + 1)
+
+    if not insertions:
+        return code
+    field = f'"primary_metric": {json.dumps(primary_metric)}, '
+    normalized = code
+    for position in sorted(insertions, reverse=True):
+        normalized = normalized[:position] + field + normalized[position:]
+    if MANIFEST_NORMALIZATION_MARKER not in normalized:
+        normalized = MANIFEST_NORMALIZATION_MARKER + "\n" + normalized
+    return normalized
+
+
+def validate_generated_manifest_fields(code: str) -> None:
+    """Reject a literal generated manifest missing the approved metric label."""
+    tree = ast.parse(code)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(target, ast.Name) and "manifest" in target.id.casefold()
+                   for target in targets):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            continue
+        keys = {
+            key.value for key in node.value.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        if "selection_metric" in keys and "primary_metric" not in keys:
+            raise ManifestError(
+                "Generated experiment_manifest is missing primary_metric; fix metadata before training"
+            )
 
 
 REQUIRED_FIELDS = {
@@ -25,7 +119,8 @@ REQUIRED_FIELDS = {
 
 
 TRAINING_POLICY_PROMPT = (
-    "Separate metric semantics: primary_metric and selection_metric must both name the approved research "
+    "MANDATORY MANIFEST SCHEMA: every working/experiment_manifest.json dictionary must contain the two "
+    "separate literal fields primary_metric and selection_metric, and both must name the approved research "
     "metric (e.g. accuracy), never validation_metric or validation_loss. checkpoint_selection must be "
     "{metric:'validation_loss',mode:'min'} or {metric:<approved primary metric>,mode:'max'}. "
     "It controls which epoch's weights are restored, independently of early_stopping.monitor. "
@@ -35,7 +130,8 @@ TRAINING_POLICY_PROMPT = (
     "training launch in this execution, including search candidates and final fits; do not count epoch helpers "
     "as launches. In inference-only mode this list is empty. "
     "Export selected_parameters as a JSON object for any method search. When globals().get('PATH_AI_REPEAT') "
-    "is present, skip ALL parameter searches and train exactly once using its learning_rate and parameters; "
+    "is present, skip ALL parameter searches, train exactly once using its learning_rate and parameters, and "
+    "write selected_parameters exactly from PATH_AI_REPEAT['parameters']; "
     "do not redefine PATH_AI_REPEAT. Repeats change only the host-injected seed. "
     "For every new experiment manifest, write max_epochs as the configured positive integer "
     "training limit per candidate and epochs as the actual completed epoch count for the "

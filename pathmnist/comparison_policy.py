@@ -33,7 +33,7 @@ def read_policy(root):
     return json.loads(path.read_text(encoding='utf-8'))['policy'] if path.exists() else None
 
 
-def validate_final_plan(code, policy, budget):
+def validate_final_plan(code, policy, budget, *, allow_search=True):
     """Require an explicit pre-execution plan; output evidence is checked again."""
     tree = ast.parse(code)
     plans = [node.value for node in tree.body if isinstance(node, ast.Assign)
@@ -51,6 +51,11 @@ def validate_final_plan(code, policy, budget):
             or len(search) + 1 > budget.max_conditions
             or sum(search) + policy['max_epochs'] > budget.max_total_epochs):
         raise IntegrityError('Reserve baseline final max_epochs first; search_epochs exceed remaining execution budget')
+    if not allow_search and search:
+        raise IntegrityError(
+            'Approved contract does not authorize method parameter search; '
+            'search_epochs must be empty and fixed baseline controls must be reused'
+        )
     # Catch common stale assignments even when the declaration is correct.
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):

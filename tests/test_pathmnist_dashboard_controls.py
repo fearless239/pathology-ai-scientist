@@ -1,7 +1,8 @@
-import json
 import importlib
+import json
 import sys
 import types
+from pathlib import Path
 
 
 def _install_fake_streamlit(monkeypatch):
@@ -226,3 +227,30 @@ def test_reset_button_retries_interrupted_stage(project_root, tmp_path, monkeypa
     assert reset_state.stages["research_understood"]["retries"] == 0
     assert reset_state.stages["research_understood"]["error"] is None
     assert advanced == ["ui-reset"]
+
+
+def test_research_creator_passes_adapter_dataset_seed_and_budget(tmp_path, monkeypatch):
+    _install_fake_streamlit(monkeypatch)
+    import app
+    importlib.reload(app)
+    captured = {}
+
+    def fake_init(args):
+        captured.update(vars(args))
+        return {"task_id": args.task_id}
+
+    monkeypatch.setattr(app, "_autonomous_init", fake_init)
+    result = app._initialize_research_task(
+        tmp_path,
+        task_id="pneumoniatest-001",
+        direction="Three paired seeds",
+        dataset_path=r"C:\datasets\pneumoniamnist.npz",
+        dataset_adapter="generic",
+        seed=7,
+        budget_limit_usd=10.0,
+    )
+    assert result == {"task_id": "pneumoniatest-001"}
+    assert captured["dataset_adapter"] == "generic"
+    assert captured["dataset_path"] == Path(r"C:\datasets\pneumoniamnist.npz")
+    assert captured["seed"] == 7
+    assert captured["budget_limit_usd"] == 10.0

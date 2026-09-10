@@ -5,7 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from pathmnist.autonomous import AIScientistExperimentRunner
-from pathmnist.autonomous_evidence import snapshot_evidence, verified_metrics
+from pathmnist.autonomous_evidence import (
+    repair_missing_primary_metric,
+    snapshot_evidence,
+    verified_metrics,
+)
 from pathmnist.scientific_integrity import IntegrityError, record_trusted_evaluation
 from pathmnist.tuning_evidence import model_signature, select_verified_tuning, validate_tuning_record
 
@@ -22,6 +26,23 @@ def test_comparison_reserves_final_training_before_search(final, search, valid):
     else:
         with pytest.raises(IntegrityError):
             validate_final_plan(code,policy,POLICIES[3].budget)
+
+
+def test_comparison_rejects_search_when_contract_did_not_authorize_it():
+    from pathmnist.comparison_policy import validate_final_plan
+    from pathmnist.stage_policy import POLICIES
+
+    policy = {'max_epochs': 15, 'early_stopping': {'enabled': False}}
+    fixed = f'FINAL_TRAINING_PLAN = {dict(policy, search_epochs=[])!r}'
+    searched = f'FINAL_TRAINING_PLAN = {dict(policy, search_epochs=[5, 5])!r}'
+
+    validate_final_plan(
+        fixed, policy, POLICIES[3].budget, allow_search=False
+    )
+    with pytest.raises(IntegrityError, match='does not authorize'):
+        validate_final_plan(
+            searched, policy, POLICIES[3].budget, allow_search=False
+        )
 
 
 def test_comparison_allows_actual_early_stop_not_changed_cap():
@@ -445,6 +466,101 @@ def test_snapshot_detects_checkpoint_tampering(tmp_path):
     (saved / "model_checkpoint.pt").write_bytes(b"changed")
     with pytest.raises(IntegrityError, match="hash mismatch"):
         verified_metrics(saved, profile, digest)
+
+
+def test_missing_primary_metric_repair_preserves_raw_and_records_derivation(tmp_path):
+    from pathmnist.research_contract import generate_contract, write_contract
+
+    profile, source, code, digest = evidence(tmp_path)
+    task_root = tmp_path / "task"
+    contract = generate_contract("Compare label smoothing accuracy", {"classes": ["a", "b"]})
+    write_contract(task_root, contract)
+    (task_root / "research" / "research_contract_approval.json").write_text(
+        json.dumps({"approved": True, "contract_sha256": contract["contract_sha256"]})
+    )
+    manifest_path = source / "experiment_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.update(
+        max_epochs=1,
+        early_stopping={"enabled": False},
+        training_runs=[{"max_epochs": 1, "epochs": 1}],
+        checkpoint_selection={"metric": "accuracy", "mode": "max"},
+    )
+    manifest_path.write_text(json.dumps(manifest))
+    (source / "contract_execution.json").write_text(
+        json.dumps({"contract_role": "baseline", "training_seed": 0})
+    )
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "run.py").write_text(code)
+    for name in ("experiment_result.json", "experiment_manifest.json",
+                 "model_checkpoint.pt", "contract_execution.json"):
+        (raw / name).write_bytes((source / name).read_bytes())
+    hashes = {
+        name: hashlib.sha256((raw / name).read_bytes()).hexdigest()
+        for name in ("run.py", "experiment_result.json", "experiment_manifest.json",
+                     "model_checkpoint.pt", "contract_execution.json")
+    }
+    (raw / "raw_receipt.json").write_text(json.dumps({
+        "schema_version": 1, "status": "unvalidated", "artifacts": hashes,
+    }))
+    original = manifest_path.read_bytes()
+    saved = repair_missing_primary_metric(raw, task_root, profile)
+    assert manifest_path.read_bytes() == original
+    assert json.loads((saved / "experiment_manifest.json").read_text())["primary_metric"] == "accuracy"
+    assert json.loads((saved / "metadata_repair.json").read_text())["change"] == {
+        "field": "primary_metric", "before": None, "after": "accuracy"
+    }
+    assert verified_metrics(saved, profile, digest)["accuracy"] == 0.5
+
+
+def test_generated_manifest_missing_primary_metric_is_rejected_before_training():
+    from pathmnist.experiment_manifest import (
+        ManifestError,
+        normalize_generated_manifest_fields,
+        validate_generated_manifest_fields,
+    )
+
+    incomplete = "manifest = {'selection_metric': 'accuracy'}"
+    with pytest.raises(ManifestError, match="missing primary_metric"):
+        validate_generated_manifest_fields(incomplete)
+    validate_generated_manifest_fields(
+        "manifest = {'primary_metric': 'accuracy', 'selection_metric': 'accuracy'}"
+    )
+    normalized = normalize_generated_manifest_fields(incomplete, "accuracy")
+    validate_generated_manifest_fields(normalized)
+    assert '"primary_metric": "accuracy"' in normalized
+    assert normalize_generated_manifest_fields(normalized, "accuracy") == normalized
+    with pytest.raises(ManifestError, match="selection_metric must be"):
+        normalize_generated_manifest_fields(incomplete, "macro_f1")
+
+
+@pytest.mark.parametrize("name", ["experiment_manifest.json", "contract_execution.json",
+                                  "experiment_result.json"])
+def test_snapshot_reuse_rejects_modified_config_role_or_result(tmp_path, name):
+    profile, directory, _, digest = evidence(tmp_path)
+    saved = tmp_path / "saved"
+    snapshot_evidence(directory, saved)
+    assert verified_metrics(saved, profile, digest)["accuracy"] == 0.5
+    path = saved / name
+    value = json.loads(path.read_text())
+    value.update({"learning_rate": 0.1} if name == "experiment_manifest.json"
+                 else {"role_id": "proposed_method"})
+    path.write_text(json.dumps(value))
+    with pytest.raises(IntegrityError, match="hash mismatch"):
+        verified_metrics(saved, profile, digest)
+    with pytest.raises(IntegrityError, match="hash mismatch"):
+        snapshot_evidence(directory, saved)
+
+
+def test_validation_reuse_rejects_test_split_even_with_matching_code(tmp_path):
+    profile, directory, _, digest = evidence(tmp_path)
+    path = directory / "experiment_result.json"
+    result = json.loads(path.read_text())
+    result.update(split="test", test_data_accessed=True)
+    path.write_text(json.dumps(result))
+    with pytest.raises(IntegrityError, match="isolated validation"):
+        verified_metrics(directory, profile, digest)
 
 
 def test_auxiliary_phases_never_execute_training_or_llm_code(project_root, tmp_path):

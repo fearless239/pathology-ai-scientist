@@ -4,6 +4,17 @@ from pathmnist.autonomous_research import prepare_research
 from pathmnist.autonomous_stages import V2_STAGES
 
 
+def test_generated_contract_uses_task_budget_and_valid_hash(tmp_path):
+    from pathmnist.autonomous_research import _generate_contract
+    from pathmnist.research_contract import contract_sha256
+
+    contract = _generate_contract(None, tmp_path, {"budget_limit_usd": 50.0},
+                                  "PathMNIST robust classification", {"classes": ["a", "b"]}, "")
+    assert contract["resource_plan"]["api_hard_limit_usd"] == 50.0
+    digest = contract.pop("contract_sha256")
+    assert digest == contract_sha256(contract)
+
+
 def test_research_writes_only_relevance_accepted_references(tmp_path):
     task_root = tmp_path / "task"
     (task_root / "dataset").mkdir(parents=True)

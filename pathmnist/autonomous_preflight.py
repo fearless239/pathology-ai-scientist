@@ -11,7 +11,7 @@ from gate_a.runner import DockerRunner
 
 from .autonomous import AIScientistExperimentRunner, AutonomousTaskWorkspace, pathology_task_description
 from .autonomous_acceptance import require_task
-from .dataset_adapter import DatasetSpec, SampleRecord
+from .dataset_adapter import DatasetSpec, load_dataset_spec
 from .research_contract import load_contract
 
 
@@ -21,24 +21,8 @@ class NoInferenceProvider:
 
 
 def _load_spec(path: Path) -> DatasetSpec:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    fields = {
-        key: raw[key]
-        for key in (
-            "schema_version", "name", "source_type", "source_path", "content_sha256",
-            "image_shape", "channels", "classes", "label_mapping", "split_counts",
-            "class_counts",
-        )
-    }
-    return DatasetSpec(
-        **fields,
-        samples=[SampleRecord(**sample) for sample in raw["samples"]],
-        has_group_ids=raw.get("has_group_ids", False),
-        inference=raw.get("inference", []),
-        warnings=raw.get("warnings", []),
-        confidence=float(raw.get("confidence", 1.0)),
-        recommended_metrics=raw.get("recommended_metrics", ["macro_f1", "accuracy"]),
-    )
+    """Backward-compatible alias for callers predating the public loader."""
+    return load_dataset_spec(path)
 
 
 def run_preflight(project_root: Path, state_root: Path, task_id: str) -> dict[str, object]:

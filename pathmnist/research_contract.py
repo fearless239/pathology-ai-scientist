@@ -77,6 +77,19 @@ def _intervention(direction: str) -> tuple[str, list[str]]:
     lowered = direction.casefold()
     names: list[str] = []
     signals: list[str] = []
+    if any(
+        token in lowered
+        for token in (
+            "类别权重",
+            "类权重",
+            "加权交叉熵",
+            "class weight",
+            "weighted cross-entropy",
+            "weighted cross entropy",
+        )
+    ):
+        names.append("class-weighted cross-entropy")
+        signals.extend(("class_weights", "weighted_cross_entropy"))
     if any(token in lowered for token in ("难例", "hard example", "hard mining", "置信度")):
         names.append("confidence-based hard-example mining")
         signals.extend(("confidence", "hard"))
@@ -108,6 +121,14 @@ def generate_contract(
     intervention_name, signals = _intervention(interpretation)
     baseline_name = "ResNet-18" if re.search(r"resnet\s*[-_]?\s*18", interpretation, re.I) else "standard image-classification baseline"
     hard_pair = any(token in interpretation.casefold() for token in ("易混淆", "类别对", "confusion pair", "难例"))
+    macro_f1_primary = bool(
+        re.search(
+            r"(?:以\s*)?(?:macro[-_ ]?f1|宏平均[-_ ]?f1)\s*(?:作为|为)?\s*(?:主要|主)指标|"
+            r"primary\s+(?:metric\s+)?(?:is\s+)?macro[-_ ]?f1",
+            interpretation,
+            re.I,
+        )
+    )
     accuracy_requested = bool(
         re.search(
             r"(?:九分类|分类|test|测试集)?[^。；,，]{0,20}(?:准确率|accuracy)",
@@ -118,6 +139,8 @@ def generate_contract(
     primary_name = (
         "confusion_pair_mean_f1"
         if hard_pair
+        else "macro_f1"
+        if macro_f1_primary
         else "accuracy"
         if accuracy_requested
         else "macro_f1"
@@ -208,7 +231,7 @@ def generate_contract(
             "stage_max_iterations": [20, 12, 12, 18],
             "experiment_timeout_seconds": 3600,
         },
-        "claim_boundary": "supervised patch-level image classification; no clinical or patient-level claims",
+        "claim_boundary": "supervised image classification; no clinical or patient-level claims",
         "revision_feedback": revision_feedback.strip(),
         "generated_at": _now(),
     }
@@ -256,6 +279,12 @@ def contract_from_extraction(
     split_seed: int = 7,
     revision_feedback: str = "",
 ) -> dict[str, Any]:
+    from jsonschema import Draft202012Validator
+
+    errors = list(Draft202012Validator(extraction_schema()).iter_errors(extraction))
+    if errors:
+        details = "; ".join(error.message[:300] for error in errors[:8])
+        raise ResearchContractError(f"Invalid research contract extraction: {details}")
     contract = generate_contract(direction, profile, split_seed=split_seed, revision_feedback=revision_feedback)
     contract["capability"] = {
         "supported": bool(extraction["supported"]),
@@ -515,27 +544,83 @@ def review_implementation_semantics(project_root: Path, task_root: Path) -> dict
         },
         "required": ["passed", "mappings", "issues"], "additionalProperties": False,
     }
+    from .method_spec import classify_requirements
+    intervention = dict(contract["interventions"][0])
+    requirement_groups = classify_requirements(
+        intervention.get("implementation_signals", [])
+    )
+    intervention["implementation_signals"] = requirement_groups["intervention"]
     scientific_contract = {
-        "baseline": contract["baseline"], "interventions": contract["interventions"],
+        "baseline": contract["baseline"], "interventions": [intervention],
         "comparisons": contract["comparisons"], "required_ablations": contract["required_ablations"],
+    }
+    from .comparison_policy import read_policy, validate_final_plan
+    from .scientific_integrity import IntegrityError
+    from .stage_policy import POLICIES
+
+    control_violations = []
+    baseline_policy = read_policy(task_root)
+    if baseline_policy is not None:
+        try:
+            validate_final_plan(
+                proposed_code,
+                baseline_policy,
+                POLICIES[3].budget,
+                allow_search=bool(
+                    contract.get("experiment_policy", {}).get("tuning", True)
+                ),
+            )
+        except IntegrityError as error:
+            control_violations.append(str(error))
+    host_controls = {
+        "requirement_groups": requirement_groups,
+        "repeat_plan": contract["repeat_plan"],
+        "paired_seed_execution": "Performed by the host as separate immutable runs, not by a loop in this source.",
+        "sealed_test_execution": "Intentionally unavailable during research; performed only after candidate freeze and explicit approval.",
     }
     prompt = (
         "Independently review whether the intervention source actually implements every method component in the approved "
         "scientific contract and is materially distinct from the baseline. Map claims to concrete functions, classes, losses, "
         "sampling operations, or training branches. Identifiers placed only in comments, output JSON, or unused variables are not "
-        "implementation. Set passed=false if a required component is absent, cosmetic, or unverifiable.\n\nCONTRACT:\n"
+        "implementation. Review only intervention implementation_signals as source-level method requirements. Paired seeds and "
+        "sealed test execution are host responsibilities documented below; do not require a seed loop or test-data branch in the "
+        "research source. Still reject unauthorized tuning, pretraining, data access, or other deviations from fixed controls. "
+        "Set passed=false if a required method component is absent, cosmetic, or unverifiable.\n\nCONTRACT:\n"
         + json.dumps(scientific_contract, ensure_ascii=False, indent=2)
+        + "\n\nHOST-ENFORCED CONTROLS:\n" + json.dumps(host_controls, ensure_ascii=False, indent=2)
         + "\n\nBASELINE SOURCE (possibly truncated):\n" + baseline_code[:20_000]
         + "\n\nINTERVENTION SOURCE (possibly truncated):\n" + proposed_code[:35_000]
     )
-    review, _ = provider.call_json(
-        "reviewer", f"{task['task_id']}-contract-semantic-review-v1-{contract['contract_sha256'][:16]}",
-        "You are an independent ML implementation reviewer. Return only JSON.", prompt,
-        "semantic_contract_review", schema,
-    )
+    source_fingerprint = hashlib.sha256(proposed_code.encode("utf-8")).hexdigest()[:16]
+    if control_violations:
+        # Deterministic fixed-control failures already require regeneration.
+        # Do not spend a reviewer call on a candidate that cannot be frozen.
+        review = {
+            "passed": False,
+            "mappings": [],
+            "issues": [
+                "Deterministic fixed-control validation failed: " + error
+                for error in control_violations
+            ],
+        }
+    else:
+        review, _ = provider.call_json(
+            "reviewer",
+            f"{task['task_id']}-contract-semantic-review-v2-"
+            f"{contract['contract_sha256'][:16]}-{source_fingerprint}",
+            "You are an independent ML implementation reviewer. Return only JSON.",
+            prompt,
+            "semantic_contract_review",
+            schema,
+        )
     record = {
         "schema_version": 1, "contract_sha256": contract["contract_sha256"],
-        "reviewer_role": "independent_reviewer", **review, "reviewed_at": _now(),
+        "reviewer_role": "independent_reviewer",
+        **review,
+        "reviewer_passed": review.get("passed") is True,
+        "deterministic_control_violations": control_violations,
+        "passed": review.get("passed") is True and not control_violations,
+        "reviewed_at": _now(),
     }
     path = task_root / "research/semantic_review.json"
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -666,8 +751,14 @@ def evaluate_fulfillment(task_root: Path, *, require_semantic_review: bool = Fal
             except ManifestError as error:
                 mismatches.append(f"invalid training policy: {error}")
             if mismatches:
+                expected = {
+                    key: baseline_controls.get(key)
+                    for key in mismatches
+                    if key in control_keys
+                }
                 errors.append(
-                    f"seed {seed} baseline/proposed fixed controls differ: {mismatches}"
+                    f"seed {seed} baseline/proposed fixed controls differ: {mismatches}; "
+                    f"trusted baseline values: {expected}"
                 )
         pair_sources.append({
             "seed": seed,

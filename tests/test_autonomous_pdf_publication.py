@@ -5,6 +5,18 @@ import pytest
 from pathmnist.autonomous_pdf import _normalize_figure_references, _normalize_verified_references, _validate_source
 
 
+def test_pdf_quality_diagnostic_reports_actual_overfull_line():
+    from pathmnist.autonomous_pdf import _pdf_quality_problems
+
+    log = "\n".join([
+        r"Overfull \hbox (2.9pt too wide) in paragraph at lines 10--11",
+        r"Overfull \hbox (15.10158pt too wide) in paragraph at lines 129--141",
+    ])
+    assert _pdf_quality_problems(log) == [
+        r"Overfull \hbox (15.10158pt too wide) in paragraph at lines 129--141"
+    ]
+
+
 def test_unicode_math_export_in_prose_and_equations():
     from pathmnist.paper_export import markdown_to_latex
     text = markdown_to_latex('# Test\nα=0.15, 28×28; $α ∈ {0.05, 0.15}$')

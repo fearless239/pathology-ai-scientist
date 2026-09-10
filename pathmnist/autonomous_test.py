@@ -8,7 +8,13 @@ from pathlib import Path
 
 from .candidates import CandidateError, FrozenCandidate, OneTimeTestEvaluator, approve_test_evaluation, require_inference_candidate
 from .experiment_contract import ExperimentResult, code_sha256
-from .dataset_adapter import DatasetSpec, SampleRecord, materialize_split_view
+from .dataset_adapter import (
+    DatasetSpec,
+    SampleRecord,
+    load_dataset_spec,
+    materialize_split_view,
+    normalize_inference_view_layout,
+)
 from .scientific_integrity import IntegrityError, record_trusted_evaluation
 from .trusted_statistics import comparison_summary
 from .execution_control import task_operation
@@ -19,12 +25,63 @@ def _candidate(task_root: Path) -> FrozenCandidate:
     return FrozenCandidate(**raw)
 
 
+def _with_inference_plot_guard(source: str) -> str:
+    """Add execution-only compatibility guards to trusted frozen inference.
+
+    Frozen programs sometimes render training curves after inference.  Those curves
+    are empty when a checkpoint is loaded, so matplotlib can reject mismatched
+    empty inputs before the program writes its prediction record.  This execution-
+    only guard ignores that single presentation error; the frozen source and its
+    integrity hash remain unchanged.
+
+    PyTorch 2.6 also changed ``torch.load`` to default to ``weights_only=True``.
+    Older generated programs may have saved a state-dict envelope containing NumPy
+    metadata, which that restricted unpickler rejects.  Frozen checkpoint hashes
+    are verified by ``require_inference_candidate`` before this wrapper is used, so
+    implicit loads of the one host-mounted checkpoint are made explicit with
+    ``weights_only=False``.  Explicit choices made by generated code are preserved,
+    and no other path receives the compatibility behavior.
+    """
+    guard = r'''
+import os as _path_ai_os
+try:
+    import torch as _path_ai_torch
+except ImportError:
+    _path_ai_torch = None
+if _path_ai_torch is not None:
+    _path_ai_original_torch_load = _path_ai_torch.load
+    def _path_ai_frozen_checkpoint_load(file, *args, **kwargs):
+        try:
+            checkpoint_path = _path_ai_os.path.realpath(_path_ai_os.fspath(file))
+        except TypeError:
+            checkpoint_path = ""
+        if "weights_only" not in kwargs and checkpoint_path == "/workspace/model_checkpoint.pt":
+            kwargs["weights_only"] = False
+        return _path_ai_original_torch_load(file, *args, **kwargs)
+    _path_ai_torch.load = _path_ai_frozen_checkpoint_load
+
+from matplotlib.axes import Axes as _PathAIAxes
+_path_ai_original_plot = _PathAIAxes.plot
+def _path_ai_inference_plot(self, *args, **kwargs):
+    try:
+        return _path_ai_original_plot(self, *args, **kwargs)
+    except ValueError as error:
+        if "x and y must have same first dimension" not in str(error):
+            raise
+        plotted = [value for value in args if not isinstance(value, (str, bytes)) and hasattr(value, "__len__")]
+        if not plotted or not any(len(value) == 0 for value in plotted):
+            raise
+        return []
+_PathAIAxes.plot = _path_ai_inference_plot
+'''
+    return guard + "\n" + source
+
+
 def validate_frozen_inference(project_root: Path, task_root: Path):
     """Exercise every frozen arm on validation only, before consuming test approval."""
     import hashlib
     from gate_a.config import load_config
     from gate_a.runner import DockerRunner
-    from .autonomous_preflight import _load_spec
     from .research_contract import load_contract
     bundle_path = task_root / 'candidate_frozen/comparison_bundle.json'
     bundle = json.loads(bundle_path.read_text(encoding='utf-8'))
@@ -39,7 +96,10 @@ def validate_frozen_inference(project_root: Path, task_root: Path):
         return
     view = directory / 'validation_view'
     if not (view / 'dataset_profile.json').is_file():
-        materialize_split_view(_load_spec(task_root / 'dataset/dataset_profile.json'), view, {'validation'})
+        materialize_split_view(load_dataset_spec(task_root / 'dataset/dataset_profile.json'), view, {'validation'})
+    normalize_inference_view_layout(
+        load_dataset_spec(task_root / 'dataset/dataset_profile.json'), view
+    )
     config = load_config(project_root / 'configs/gate_a_llm.yaml')
     runner = DockerRunner(replace(config.runner, image='path-scientist-pathmnist-runner:0.1',
                                    timeout_seconds=1800), gpus='all', shm_size='2g')
@@ -49,7 +109,7 @@ def validate_frozen_inference(project_root: Path, task_root: Path):
         frozen = task_root / 'candidate_frozen'
         shutil.copy2(frozen / arm['checkpoint'], work / 'model_checkpoint.pt')
         source = (frozen / arm['code']).read_text(encoding='utf-8')
-        result = runner.run_python(source, work, 'run.py', dataset_mount=view)
+        result = runner.run_python(_with_inference_plot_guard(source), work, 'run.py', dataset_mount=view)
         if not result.succeeded:
             raise CandidateError(f"Frozen inference preflight failed: {arm['experiment_id']}: {result.stderr[-2000:]}")
         raw = json.loads((work / 'working/experiment_result.json').read_text(encoding='utf-8'))
@@ -121,6 +181,9 @@ def evaluate(project_root: Path, state_root: Path, task_id: str) -> dict[str, ob
         raise CandidateError('Test was attempted without a complete receipt; manual recovery required')
     validate_frozen_inference(project_root, task_root)
     sealed = _make_sealed_view(task_root, final_root / "sealed_test")
+    normalize_inference_view_layout(
+        load_dataset_spec(task_root / "dataset/dataset_profile.json"), sealed
+    )
     evaluator = OneTimeTestEvaluator(final_root)
     config = load_config(project_root / "configs/gate_a_llm.yaml")
     runner_config = replace(config.runner, image="path-scientist-pathmnist-runner:0.1", timeout_seconds=1800, cpus=4.0, memory="8g")
@@ -148,7 +211,7 @@ def evaluate(project_root: Path, state_root: Path, task_id: str) -> dict[str, ob
             arm_checkpoint = task_root / "candidate_frozen" / arm["checkpoint"]
             shutil.copy2(arm_checkpoint, run_dir / "model_checkpoint.pt")
             source = arm_code_path.read_text(encoding="utf-8")
-            result = runner.run_python(source, run_dir, "run.py", dataset_mount=test_view)
+            result = runner.run_python(_with_inference_plot_guard(source), run_dir, "run.py", dataset_mount=test_view)
             if not result.succeeded:
                 raise CandidateError(f"Frozen comparison arm {arm_name} failed: {result.stderr[-4000:]}")
             raw_path = run_dir / "working/experiment_result.json"

@@ -20,9 +20,11 @@ TEX = r"""\documentclass{article}
 class Provider:
     def __init__(self):
         self.calls = []
+        self.messages = []
 
     def call_text(self, role, request, system, prompt):
         self.calls.append(request)
+        self.messages.append((role, system, prompt))
         if role == "reviewer":
             result = (
                 "```json\n"
@@ -80,6 +82,163 @@ def test_real_native_steps_resume_without_new_provider_calls(tmp_path, monkeypat
     assert len(provider.calls) == count
     assert stages[-1] == "translation_completed"
     assert pub.artifacts(tmp_path, "revision_completed")[0]["source"].endswith("template.tex")
+    draft_payload = json.loads(provider.messages[0][2])
+    draft_prompt = draft_payload["messages"][0]["content"]
+    assert "research_question" in draft_prompt
+    assert "figure_hashes" not in draft_prompt
+    assert "Organize the manuscript around the research question" in draft_prompt
+    assert "Check scientific argument" in provider.messages[1][2]
+    assert "Check scientific argument" in provider.messages[2][2]
+    # Full scientific evidence remains available without the cache identity envelope.
+    assert json.dumps(analysis()["evidence"], ensure_ascii=False) in draft_prompt
+
+
+def test_initial_manuscript_validation_uses_bounded_cached_repair(tmp_path, monkeypatch):
+    from pathmnist import autonomous_postprocess, autonomous_pdf
+
+    monkeypatch.setattr(autonomous_postprocess, "_commit_stage", lambda *_: None)
+    monkeypatch.setattr(
+        autonomous_pdf,
+        "_compile",
+        lambda directory, name, **kwargs: (directory / name).with_suffix(".pdf").write_bytes(
+            b"%PDF" + b"x" * 12000
+        ),
+    )
+
+    class RepairingProvider(Provider):
+        def call_text(self, role, request, system, prompt):
+            result, metadata = super().call_text(role, request, system, prompt)
+            paper_calls = sum(message[0] == "paper_writer" for message in self.messages)
+            if role == "paper_writer" and paper_calls == 1:
+                result = "```latex\n" + TEX.replace("0.8", "0.99") + "\n```"
+            return result, metadata
+
+    provider = RepairingProvider()
+    project = Path(__file__).resolve().parents[1]
+    pub.run(project, tmp_path, analysis(), provider)
+    manifest = pub.read(tmp_path / "paper/publication_manifest.json")
+    draft = tmp_path / manifest["stages"]["paper_written"][0]["source"]
+    assert "0.99" not in draft.read_text(encoding="utf-8")
+    assert any("draft-repair" in path.name for path in draft.parent.glob("*.json"))
+
+
+def test_research_brief_preserves_question_and_does_not_invent_missing_basis():
+    value = analysis()
+    value["task_id"] = "private-task"
+    value["evidence"]["research_contract"] = {
+        "research_question": "Does smoothing improve this CNN?",
+        "success_criteria": ["accuracy difference >= 0.01"],
+        "repeat_plan": {"seeds": [0]},
+        "baseline": {"name": "CNN"},
+    }
+    value["finding"] = "Observed test accuracy difference 0.02; descriptive only."
+    brief = pub.research_brief(value)
+    assert brief["research_question"] == "Does smoothing improve this CNN?"
+    assert brief["conclusion_limits"]["repeat_plan"] == {"seeds": [0]}
+    assert brief["observed_finding"] == value["finding"]
+    assert brief["literature_basis"][0]["citation_key"] == "R1"
+    assert brief["literature_basis"][0]["abstract"].startswith("Not provided")
+    assert brief["comparison_design"]["interventions"].startswith("Not provided")
+    assert "private-task" not in json.dumps(brief)
+
+
+@pytest.mark.parametrize("stage", pub.STAGES)
+def test_resume_rejects_modified_committed_output_before_cache_repair(tmp_path, monkeypatch, stage):
+    from pathmnist import autonomous_postprocess, autonomous_pdf
+
+    monkeypatch.setattr(autonomous_postprocess, "_commit_stage", lambda *_: None)
+
+    def compile(directory, name, **kwargs):
+        (directory / name).with_suffix(".pdf").write_bytes(b"%PDF")
+        return "ok"
+
+    monkeypatch.setattr(autonomous_pdf, "_compile", compile)
+    provider = Provider()
+    project = Path(__file__).resolve().parents[1]
+    pub.run(project, tmp_path, analysis(), provider)
+    row = pub.artifacts(tmp_path, stage)[0]
+    path = tmp_path / row["source"]
+    path.write_text("modified", encoding="utf-8")
+    calls = len(provider.calls)
+    with pytest.raises(ValueError, match="hash mismatch") as error:
+        pub.run(project, tmp_path, analysis(), provider)
+    assert row["source"] in str(error.value)
+    assert path.read_text() == "modified"
+    assert len(provider.calls) == calls
+
+
+def test_changed_evidence_requires_version_review_without_new_calls(tmp_path, monkeypatch):
+    from pathmnist import autonomous_postprocess, autonomous_pdf
+
+    monkeypatch.setattr(autonomous_postprocess, "_commit_stage", lambda *_: None)
+
+    def compile(directory, name, **kwargs):
+        (directory / name).with_suffix(".pdf").write_bytes(b"%PDF")
+        return "ok"
+
+    monkeypatch.setattr(autonomous_pdf, "_compile", compile)
+    provider = Provider()
+    project = Path(__file__).resolve().parents[1]
+    pub.run(project, tmp_path, analysis(), provider)
+    changed = analysis()
+    changed["evidence"]["validation_metrics"]["accuracy"] = 0.5
+    with pytest.raises(ValueError, match="new-version review"):
+        pub.run(project, tmp_path, changed, provider)
+    assert len(provider.calls) == 4
+
+
+def test_backend_only_change_migrates_existing_review(tmp_path, monkeypatch):
+    import hashlib
+    from pathmnist import autonomous_postprocess, autonomous_pdf
+
+    monkeypatch.setattr(autonomous_postprocess, "_commit_stage", lambda *_: None)
+    monkeypatch.setattr(
+        autonomous_pdf,
+        "_compile",
+        lambda directory, name, **kwargs: (directory / name).with_suffix(".pdf").write_bytes(b"%PDF"),
+    )
+    provider = Provider()
+    project = Path(__file__).resolve().parents[1]
+    value = analysis()
+    pub.run(project, tmp_path, value, provider)
+    manifest_path = tmp_path / "paper/publication_manifest.json"
+    manifest = pub.read(manifest_path)
+    previous_version = "previous-backend"
+    identity = json.dumps(
+        {"analysis": value, "version": previous_version, "figure_hashes": {}},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    manifest["backend_version"] = previous_version
+    manifest["input_sha256"] = hashlib.sha256(identity.encode()).hexdigest()
+    pub.save(manifest_path, manifest)
+    calls = len(provider.calls)
+    pub.run(project, tmp_path, value, provider)
+    assert len(provider.calls) == calls
+    assert pub.read(manifest_path)["backend_version"] != previous_version
+
+
+def test_changed_source_figure_blocks_publication_resume(tmp_path, monkeypatch):
+    from pathmnist import autonomous_postprocess, autonomous_pdf
+
+    monkeypatch.setattr(autonomous_postprocess, "_commit_stage", lambda *_: None)
+
+    def compile(directory, name, **kwargs):
+        (directory / name).with_suffix(".pdf").write_bytes(b"%PDF")
+        return "ok"
+
+    monkeypatch.setattr(autonomous_pdf, "_compile", compile)
+    source = tmp_path / "result.png"
+    source.write_bytes(b"original offline figure")
+    value = analysis()
+    value["figures"]["figures"] = [{"path": "result.png"}]
+    provider = Provider()
+    project = Path(__file__).resolve().parents[1]
+    pub.run(project, tmp_path, value, provider)
+    source.write_bytes(b"substituted offline figure")
+    with pytest.raises(ValueError, match="new-version review"):
+        pub.run(project, tmp_path, value, provider)
+    assert len(provider.calls) == 4
 
 
 def test_unknown_backend_and_path_escape_fail_closed(tmp_path):
@@ -105,9 +264,93 @@ def test_invalid_native_artifacts_are_rejected(replacement):
         pub.validate_tex(TEX + replacement, ["R1"], [])
 
 
+def test_native_template_figure_paths_are_made_explicit():
+    generated = TEX.replace(
+        r"\begin{document}",
+        "\\begin{filecontents}{references.bib}\nunsafe embedded bib\n\\end{filecontents}\n"
+        "\\graphicspath{{../figures/}} % inherited upstream directive\n"
+        r"\begin{document}\includegraphics[width=1in]{result.png}",
+    )
+    normalized = pub.normalize_tex_paths(generated, ["figures/result.png"])
+    assert r"\begin{filecontents}" not in normalized
+    assert r"\graphicspath" not in normalized
+    assert r"\includegraphics[width=1in]{figures/result.png}" in normalized
+    pub.validate_tex(normalized, ["R1"], ["figures/result.png"])
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["result.png", "result", "figures/result", "./figures/result.png"],
+)
+def test_verified_figure_aliases_are_normalized_without_model_retry(alias):
+    generated = TEX.replace(
+        r"\begin{document}",
+        rf"\begin{{document}}\includegraphics{{{alias}}}",
+    )
+    normalized = pub.normalize_tex_paths(generated, ["figures/result.png"])
+    assert r"\includegraphics{figures/result.png}" in normalized
+    pub.validate_tex(normalized, ["R1"], ["figures/result.png"])
+
+
+def test_ambiguous_figure_stem_is_not_silently_selected():
+    generated = TEX.replace(
+        r"\begin{document}",
+        r"\begin{document}\includegraphics{result}",
+    )
+    normalized = pub.normalize_tex_paths(
+        generated, ["figures/result.png", "figures/result.pdf"]
+    )
+    with pytest.raises(ValueError, match=r"Unknown figure reference.*result"):
+        pub.validate_tex(
+            normalized,
+            ["R1"],
+            ["figures/result.png", "figures/result.pdf"],
+        )
+
+
+def test_generated_tables_are_constrained_once_without_changing_cells():
+    table = (
+        r"\begin{tabular}{lcc}" "\n"
+        r"Mean Difference & 0.0422 & 0.0743 \\" "\n"
+        r"\end{tabular}"
+    )
+    generated = TEX.replace(r"\begin{document}", r"\begin{document}" + table)
+    normalized = pub.normalize_tex_paths(generated, [])
+    assert normalized.count(r"\resizebox{\columnwidth}{!}{%") == 1
+    assert table in normalized
+    assert pub.normalize_tex_paths(normalized, []) == normalized
+
+
+def test_literature_authors_are_rendered_as_bibtex_names():
+    assert pub.bibtex_authors("Taymaz Akan, Richa Aishwarya, et al.") == (
+        "Taymaz Akan and Richa Aishwarya and others"
+    )
+    assert pub.bibtex_authors(["Ada Lovelace", "Alan Turing"]) == (
+        "Ada Lovelace and Alan Turing"
+    )
+
+
 def test_translation_preserves_environment_and_citation_tokens():
     pieces, indices = pub.translate_segments(r"\begin{abstract}Accuracy 0.8\end{abstract}\cite{R1}")
     assert [pieces[i] for i in indices] == ["Accuracy 0.8"]
+
+
+def test_translation_safety_allows_reordered_numbers_and_preserved_latex():
+    assert pub.translation_segment_is_safe(
+        r"Counts 1041, 1057 for classes 0--8; subset 20\%.",
+        r"类别0--8的计数为1057、1041；子集20\%。",
+    )
+    assert not pub.translation_segment_is_safe("Accuracy 0.8", "准确率0.9")
+    assert not pub.translation_segment_is_safe(r"subset 20\%", "子集20%")
+    assert pub.translation_segment_is_safe(r"baseline vs.\ smoothing", "基线与平滑")
+
+
+def test_compile_source_adds_cleveref_for_preserved_cref():
+    source = "\\documentclass{article}\n\\begin{document}See \\cref{fig:a}.\\end{document}"
+    normalized = pub.normalize_compile_source(source)
+    assert r"\usepackage{cleveref}" in normalized
+    assert normalized.count(r"\usepackage{cleveref}") == 1
+    assert pub.normalize_compile_source(normalized) == normalized
 
 
 @pytest.mark.parametrize("boundary", pub.STAGES)
@@ -147,6 +390,71 @@ def test_gateway_response_receipt_survives_missing_projection(tmp_path):
 def test_numeric_hallucination_is_rejected():
     with pytest.raises(ValueError, match="absent from evidence"):
         pub.validate_evidence_numbers(TEX.replace("0.8", "0.99"), analysis()["evidence"])
+
+
+def test_numeric_audit_accepts_magnitude_of_evidenced_decrease():
+    manuscript = TEX.replace("0.8", "0.61")
+    pub.validate_evidence_numbers(manuscript, {"mean_difference": -0.0061281337})
+
+
+def test_numeric_audit_ignores_latex_layout_dimensions_but_not_scientific_units():
+    layout = TEX.replace(
+        r"\begin{document}",
+        r"\begin{document}\vskip 0.3in\hspace{0.25\linewidth}",
+    )
+    pub.validate_evidence_numbers(layout, analysis()["evidence"])
+    scientific = TEX.replace("Accuracy 0.8", "Accuracy 0.8 at a measured 0.3 mm")
+    with pytest.raises(ValueError, match=r"0\.3"):
+        pub.validate_evidence_numbers(scientific, analysis()["evidence"])
+
+
+def test_numeric_audit_accepts_explicitly_derived_class_ratio():
+    from pathmnist.publication import publication_dataset_profile
+
+    evidence = {
+        "dataset": publication_dataset_profile(
+            {"name": "binary", "class_counts": {"train": {"0": 1214, "1": 3494}}}
+        )
+    }
+    manuscript = TEX.replace("Accuracy 0.8", "Class imbalance was 2.88:1")
+    pub.validate_evidence_numbers(manuscript, evidence)
+
+
+def test_review_schema_checks_list_members_and_normalizes_decision_case():
+    review = pub.normalize_review(
+        {
+            "Summary": "Summary",
+            "Weaknesses": ["Limited repeats"],
+            "Questions": ["None"],
+            "Decision": "reject",
+        }
+    )
+    assert review["Decision"] == "Reject"
+    with pytest.raises(ValueError, match="list of strings"):
+        pub.normalize_review(
+            {
+                "Summary": "Summary",
+                "Weaknesses": [1],
+                "Questions": [],
+                "Decision": "Reject",
+            }
+        )
+
+
+def test_final_compile_removes_icml_review_ruler_without_claiming_acceptance():
+    source = r"""\documentclass{article}
+\usepackage{icml2025}
+\begin{document}
+Report
+\end{document}"""
+
+    compiled = pub.normalize_compile_source(source)
+
+    assert r"\ClearShipoutPicture" in compiled
+    assert r"\renewcommand{\Notice@String}{}" in compiled
+    assert r"\def\isaccepted{1}" not in compiled
+    assert r"\usepackage[accepted]{icml2025}" not in compiled
+    assert r"\icmlcorrespondingauthor{Anonymous}{anonymous@example.invalid}" in compiled
 
 
 def test_compiler_receipt_recovers_without_recompile(tmp_path):

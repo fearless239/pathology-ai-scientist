@@ -155,9 +155,34 @@ def export_journals(project_root: Path, state_root: Path, task_id: str) -> dict[
     stage_summary: dict[str, dict[str, int]] = {}
     for stage_name, journal in journals.items():
         successful = 0
+        valid_repeat_parents = {
+            hashlib.sha256(node.code.encode("utf-8")).hexdigest()
+            for node in journal.nodes
+            if node.is_buggy is False
+            and not getattr(node, "is_seed_node", False)
+            and not getattr(node, "is_seed_agg_node", False)
+        }
         for node in journal.nodes:
             if node.is_buggy is not False:
                 continue
+            if getattr(node, "is_seed_node", False) and not getattr(
+                node, "is_seed_agg_node", False
+            ):
+                repeat_match = re.search(
+                    r'^# PATH_AI_REPEAT: (.+)$', node.code, re.MULTILINE
+                )
+                try:
+                    repeat_parent = (
+                        json.loads(repeat_match.group(1)).get("parent_code_sha256")
+                        if repeat_match
+                        else None
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    repeat_parent = None
+                if repeat_parent not in valid_repeat_parents:
+                    # A repaired/rejected parent invalidates its derived repeats
+                    # without deleting their immutable evidence directories.
+                    continue
             if node.id in seen_node_ids:
                 continue
             seen_node_ids.add(node.id)

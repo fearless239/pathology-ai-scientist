@@ -1,0 +1,7 @@
+id,path,label,split,patient_id
+train-normal-001,images/train-normal-001.png,normal,train,patient-001
+train-positive-001,images/train-positive-001.png,positive,train,patient-002
+validation-normal-001,images/validation-normal-001.png,normal,validation,patient-003
+validation-positive-001,images/validation-positive-001.png,positive,validation,patient-004
+test-normal-001,images/test-normal-001.png,normal,test,patient-005
+test-positive-001,images/test-positive-001.png,positive,test,patient-006

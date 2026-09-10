@@ -9,6 +9,8 @@ from pathmnist.autonomous import (
     AIScientistExperimentRunner,
     EXECUTION_POLICY_REVISION,
     _grant_policy_repair_window,
+    _inherited_stage_node_ids,
+    _canonical_repeat_parameters,
     has_valid_generated_node,
     _allowed_contract_roles,
     _validate_experiment_execution_budget,
@@ -372,6 +374,21 @@ def test_import_preflight_failure_returns_repairable_node(project_root, tmp_path
     assert "IMPORT_PREFLIGHT_FAILED" in "".join(result.term_out)
 
 
+def test_manifest_preflight_failure_returns_repairable_node(project_root, tmp_path):
+    class FakeDockerRunner:
+        def run_python(self, *args, **kwargs):
+            raise AssertionError("invalid generated metadata must be rejected before training")
+
+    runner = AIScientistExperimentRunner(project_root, object(), FakeDockerRunner())
+    *_, interpreter = runner._runtime_classes(tmp_path / "dataset")
+    code = "manifest = {'selection_metric': 'accuracy'}\nprint('experiment')"
+
+    result = interpreter(tmp_path / "process").run(code)
+
+    assert result.exc_type == "ManifestError"
+    assert "missing primary_metric" in "".join(result.term_out)
+
+
 def test_worker_task_description_retains_exported_interface(project_root, tmp_path):
     runner = AIScientistExperimentRunner(project_root, object(), object())
     manager, _, _, _ = runner._runtime_classes(tmp_path)
@@ -446,7 +463,12 @@ def test_both_runtime_agents_use_strict_code_response_parser(project_root, tmp_p
     from ai_scientist.treesearch import parallel_agent
     for cls in (parallel, minimal):
         instance = object.__new__(cls)
-        instance.cfg = SimpleNamespace(agent=SimpleNamespace(code=SimpleNamespace(model='fake', temp=0)))
+        instance.cfg = SimpleNamespace(
+            agent=SimpleNamespace(
+                code=SimpleNamespace(model='fake', temp=0),
+                contract_metric='accuracy',
+            )
+        )
         calls = []
         def query(**kwargs):
             calls.append(kwargs)
@@ -457,6 +479,33 @@ def test_both_runtime_agents_use_strict_code_response_parser(project_root, tmp_p
         assert 'Required complete response' in calls[0]['user_message']
         assert plan
         assert 'print(1)' in code
+
+
+def test_minimal_agent_normalizes_manifest_before_returning_generated_code(
+    project_root, tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    runner = AIScientistExperimentRunner(project_root, object(), object())
+    _, _, minimal, _ = runner._runtime_classes(tmp_path)
+    from ai_scientist.treesearch import parallel_agent
+
+    instance = object.__new__(minimal)
+    instance.cfg = SimpleNamespace(
+        agent=SimpleNamespace(
+            code=SimpleNamespace(model='fake', temp=0),
+            contract_metric='macro_f1',
+        )
+    )
+
+    def query(**kwargs):
+        return "```python\nexperiment_manifest = {'selection_metric': 'macro_f1'}\n```"
+
+    monkeypatch.setattr(parallel_agent, 'query', query)
+    _, code = instance.plan_and_code_query({'Task': 'baseline'})
+
+    assert '# PATH_AI_MANIFEST_NORMALIZATION:' in code
+    assert '"primary_metric": "macro_f1"' in code
 
 
 def test_repeated_preflight_failures_stop_before_more_paid_attempts():
@@ -470,8 +519,148 @@ def test_repeated_preflight_failures_stop_before_more_paid_attempts():
     _check_repeated_preflight_failures(N(nodes=[node('loss'),N(is_buggy=False,_term_out=[]),node('model')]))
 
 
+def test_old_missing_primary_metric_failures_enter_project_level_normalizer():
+    from types import SimpleNamespace as N
+    from pathmnist.autonomous import (
+        AutonomousExperimentError,
+        _check_repeated_preflight_failures,
+    )
+
+    message = (
+        "Generated experiment rejected before execution: Generated "
+        "experiment_manifest is missing primary_metric; fix metadata before training"
+    )
+    journal = N(
+        nodes=[
+            N(
+                is_buggy=True,
+                _term_out=[message],
+                code="manifest = {'selection_metric': 'macro_f1'}",
+            )
+            for _ in range(3)
+        ]
+    )
+    _check_repeated_preflight_failures(journal, primary_metric='macro_f1')
+
+    with pytest.raises(AutonomousExperimentError, match='REPEATED_PREFLIGHT_BLOCKED'):
+        _check_repeated_preflight_failures(journal, primary_metric='accuracy')
+
+
+def test_stage_recovery_identifies_only_immediate_predecessor_nodes():
+    from types import SimpleNamespace as N
+
+    baseline = N(nodes=[N(id='baseline-best'), N(id='baseline-rejected')])
+    unrelated = N(nodes=[N(id='other')])
+    journals = {'1_baseline': baseline, '2_tuning': unrelated, '3_proposed': N(nodes=[])}
+    history = [
+        N(from_stage='1_baseline', to_stage='2_tuning'),
+        N(from_stage='1_baseline', to_stage='3_proposed'),
+    ]
+
+    assert _inherited_stage_node_ids(journals, history, '3_proposed') == {
+        'baseline-best', 'baseline-rejected'
+    }
+    assert _inherited_stage_node_ids(journals, history, 'missing') == set()
+
+
+def test_repeat_parameters_ignore_only_matching_redundant_learning_rate():
+    parent = {
+        'class_weights': 'inverse_frequency',
+        'loss': 'weighted_cross_entropy',
+        'selected_learning_rate': 0.001,
+    }
+    repeated = {
+        'class_weights': 'inverse_frequency',
+        'loss': 'weighted_cross_entropy',
+    }
+
+    assert _canonical_repeat_parameters(parent, 0.001) == repeated
+    assert _canonical_repeat_parameters(repeated, 0.001) == repeated
+    with pytest.raises(IntegrityError, match='disagrees'):
+        _canonical_repeat_parameters(parent, 0.002)
+    assert _canonical_repeat_parameters(
+        {**repeated, 'weight_decay': 0.01}, 0.001
+    ) != repeated
+
+
+def test_project_level_taxonomy_upgrade_reopens_resolved_preflight_failures():
+    from types import SimpleNamespace as N
+    from pathmnist.autonomous import _check_repeated_preflight_failures
+
+    message = (
+        "Generated experiment rejected before execution: Proposed-method code "
+        "needs review for unknown components: ['initialization']"
+    )
+    code = (
+        '# PATH_AI_METHOD_SPEC: {"schema_version":1,"hypothesis":"x",'
+        '"components":[{"id":"init","category":"initialization",'
+        '"implementation_symbols":["from_scratch"]}],"changes":[],"preserved":[]}\n'
+        'loss = nn.CrossEntropyLoss(label_smoothing=0.1)\nloss.backward()'
+    )
+    journal = N(
+        nodes=[N(is_buggy=True, _term_out=[message], code=code) for _ in range(3)]
+    )
+
+    _check_repeated_preflight_failures(
+        journal,
+        stage_name='3_creative_research_1_first_attempt',
+        signals=['label_smoothing'],
+    )
+
+
+def test_contract_signal_ownership_upgrade_reopens_valid_latest_repair():
+    from types import SimpleNamespace as N
+    from pathmnist.autonomous import _check_repeated_preflight_failures
+    from pathmnist.method_spec import classify_requirements
+
+    old_required = (
+        "required=['inverse_freq_weights', 'class_weighted_loss', 'paired_seeds', "
+        "'sealed_test_eval', 'early_stopping_patience', 'fixed_optimizer', "
+        "'no_pretrain']"
+    )
+    message = (
+        'Generated experiment rejected before execution: Proposed-method stage '
+        'does not implement every approved intervention signal; ' + old_required
+    )
+    code = 'criterion = nn.CrossEntropyLoss(weight=class_weights)\nloss.backward()'
+    journal = N(
+        nodes=[N(is_buggy=True, _term_out=[message], code=code) for _ in range(3)]
+    )
+    groups = classify_requirements([
+        'inverse_freq_weights', 'weighted_cross_entropy', 'paired_seeds',
+        'sealed_test_eval', 'early_stopping_patience', 'fixed_optimizer',
+        'no_pretrain',
+    ])
+
+    _check_repeated_preflight_failures(
+        journal,
+        stage_name='3_creative_research_1_first_attempt',
+        signals=groups['intervention'],
+    )
+
+
+def test_preserved_false_positive_baseline_nodes_can_be_revalidated():
+    from types import SimpleNamespace as N
+    from pathmnist.autonomous import _check_repeated_preflight_failures
+
+    code = (
+        'model=nn.Conv2d(3, 8, 3)\ncriterion=nn.CrossEntropyLoss()\n'
+        'loss=criterion(model(x), y)\nloss.backward()'
+    )
+    message = (
+        'Generated experiment rejected before execution: '
+        "Baseline stage implements intervention signals: ['conv2d']"
+    )
+    journal = N(nodes=[N(is_buggy=True, _term_out=[message], code=code) for _ in range(3)])
+    _check_repeated_preflight_failures(
+        journal, '1_initial_implementation_1_preliminary',
+        ['label_smoothing', 'CrossEntropyLoss', 'conv2d'],
+    )
+
+
 def test_baseline_structural_contract_signals_are_allowed():
-    code = 'model = Net(num_classes=9)\nx=self.conv1(x)\ncriterion=nn.CrossEntropyLoss()\nloss.backward()'
-    _validate_stage_semantics(code, '1_initial_implementation', ['conv1','num_classes','cross_entropy','label_smoothing'])
+    code = 'model = nn.Conv2d(3, 8, 3)\ncriterion=nn.CrossEntropyLoss()\nloss=criterion(model(x), y)\nloss.backward()'
+    _validate_stage_semantics(code, '1_initial_implementation',
+                              ['conv2d','num_classes','CrossEntropyLoss','from_scratch','test_accuracy','label_smoothing'])
     with pytest.raises(IntegrityError, match='Baseline stage implements'):
         _validate_stage_semantics(code.replace('CrossEntropyLoss()', 'CrossEntropyLoss(label_smoothing=0.1)'), '1_initial_implementation', ['label_smoothing'])

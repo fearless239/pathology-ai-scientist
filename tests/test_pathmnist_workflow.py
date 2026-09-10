@@ -169,8 +169,12 @@ def real_executor(project_root):
 
 
 def require_real_dataset(project_root):
+    import os
+
+    if os.environ.get("PATH_AI_RUN_REAL_DATA_TESTS") != "1":
+        pytest.skip("set PATH_AI_RUN_REAL_DATA_TESTS=1 for manual real-data integration tests")
     if not (project_root / "pathmnist_64.npz").is_file():
-        pytest.skip("manual real-PathMNIST integration test; dataset is intentionally absent from Git")
+        pytest.skip("manual real-PathMNIST integration test requires pathmnist_64.npz")
 
 
 def run_stages(store, task_id, count, project_root, artifact_root, executor=None):
@@ -559,4 +563,3 @@ def test_worker_recovery_rolls_back_invalid_completed_artifact(project_root, tmp
     state = repair_to_valid_stage(state, store, tmp_path / "artifacts")
     assert state.completed_stage == "task_created"
     assert state.stages["dataset_validated"]["status"] == "waiting"
-

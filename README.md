@@ -162,7 +162,9 @@ Create a task with a high-level pathology research direction:
 ```bash
 path-ai-scientist init \
   --task-id TASK \
+  --dataset-adapter generic \
   --dataset-path pathmnist_64.npz \
+  --budget-limit-usd 10 \
   --direction "Describe the pathology AI research direction"
 
 path-ai-scientist run --task-id TASK
@@ -258,12 +260,17 @@ human review and independent validation.
 
 ### Which datasets are supported?
 
-PathMNIST is the first complete reference adapter in the current beta. The framework contracts are intended
-to support additional pathology datasets over time.
+The built-in generic adapter accepts NPZ, image-folder, and CSV/JSON manifest datasets. Trusted custom
+adapters can be loaded with `package.module:AdapterClass`; see the
+[dataset adapter guide](docs/DATASET_ADAPTERS.md) and copyable template. PathMNIST remains the first
+complete pathology reference case in the current beta.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Dataset adapter guide](docs/DATASET_ADAPTERS.md)
+- [PneumoniaMNIST UI runbook (Chinese)](docs/PNEUMONIAMNIST_RUNBOOK.zh-CN.md)
+- [PneumoniaMNIST end-to-end case study and English paper](docs/case-studies/pneumoniatest-001/README.md)
 - [Publication backend](docs/UPSTREAM_PUBLICATION.md)
 - [Source provenance](docs/SOURCE_PROVENANCE.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)

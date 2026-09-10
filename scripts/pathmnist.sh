@@ -187,10 +187,13 @@ case "${1:-help}" in
     fi
     mkdir -p "$project_root/state/workflow"
     extra_mounts+=(--mount "type=bind,src=$project_root/state,dst=$project_root/state")
-    if [[ -d "$project_root/runs" ]]; then
-      extra_mounts+=(--mount "type=bind,src=$project_root/runs,dst=$project_root/runs")
-    else
-      extra_mounts+=(--mount "type=volume,src=pathmnist_runs,dst=$project_root/runs")
+    # Nested writable mounts must exist before mounting the project read-only.
+    # Keep web outputs in this checkout; do not implicitly share another task's volume.
+    mkdir -p "$project_root/runs"
+    extra_mounts+=(--mount "type=bind,src=$project_root/runs,dst=$project_root/runs")
+    datasets_dir="${PATH_AI_DATASETS_DIR:-$(dirname "$project_root")/datasets}"
+    if [[ -d "$datasets_dir" ]]; then
+      extra_mounts+=(--mount "type=bind,src=$datasets_dir,dst=/datasets,readonly")
     fi
     "${docker_cmd[@]}" run --rm --gpus all \
       --shm-size 2g \

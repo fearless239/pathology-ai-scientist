@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+DEFAULT_RESEARCH_BUDGET_USD = 50.0
+
 
 class ConfigError(ValueError):
     """Raised when a Gate A configuration is incomplete or unsafe."""
@@ -174,9 +176,9 @@ def load_config(path: Path) -> AppConfig:
         )
 
     hard_limit = float(_require(budget_raw, "hard_limit_usd", "budget"))
-    if not 0 < hard_limit <= 8.0:
+    if not 0 < hard_limit <= DEFAULT_RESEARCH_BUDGET_USD:
         raise ConfigError(
-            "Gate A hard_limit_usd must be greater than 0 and at most 8.0"
+            "Gate A hard_limit_usd must be greater than 0 and at most 50.0"
         )
 
     cny_per_usd = float(budget_raw.get("cny_per_usd", 1.0))

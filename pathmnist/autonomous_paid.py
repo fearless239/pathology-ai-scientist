@@ -26,13 +26,13 @@ from .execution_control import task_lock
 from .tuning_evidence import select_verified_tuning
 
 
-def run_paid(project_root: Path, state_root: Path, task_id: str, *, repair_dynamic: bool = False) -> dict[str, object]:
+def run_paid(project_root: Path, state_root: Path, task_id: str, *, repair_dynamic: bool = False, fixed_control_repair: str | None = None) -> dict[str, object]:
     workspace = AutonomousTaskWorkspace.create(state_root.resolve(), task_id)
     with task_lock(workspace.root, reentrant=True):
-        return _run_paid_locked(project_root, state_root, task_id, repair_dynamic=repair_dynamic)
+        return _run_paid_locked(project_root, state_root, task_id, repair_dynamic=repair_dynamic, fixed_control_repair=fixed_control_repair)
 
 
-def _run_paid_locked(project_root: Path, state_root: Path, task_id: str, *, repair_dynamic: bool = False) -> dict[str, object]:
+def _run_paid_locked(project_root: Path, state_root: Path, task_id: str, *, repair_dynamic: bool = False, fixed_control_repair: str | None = None) -> dict[str, object]:
     project_root, state_root = project_root.resolve(), state_root.resolve()
     workspace = AutonomousTaskWorkspace.create(state_root, task_id)
     task_path = workspace.root / "task.json"
@@ -55,9 +55,8 @@ def _run_paid_locked(project_root: Path, state_root: Path, task_id: str, *, repa
 
     provider_config = load_config(project_root / "configs/gate_a_llm.yaml")
     budget_limit = float(task.get("budget_limit_usd", 8.0))
-    if budget_limit != 8.0:
-        budget_limit = 8.0
-        task["budget_limit_usd"] = budget_limit
+    if not 0 < budget_limit <= provider_config.budget.hard_limit_usd:
+        raise ValueError("Task budget must be positive and within the configured limit")
     ledger = BudgetLedger.open_or_upgrade(workspace.root / "budget.json", budget_limit)
     selected = select_live_models(provider_config)
     provider = ZhipuProvider(provider_config, selected, ledger, workspace.research / "responses")
@@ -72,7 +71,8 @@ def _run_paid_locked(project_root: Path, state_root: Path, task_id: str, *, repa
     docker_runner = DockerRunner(runner_config, gpus="all", shm_size="2g", stream_output=True)
     docker_runner.cancel_active(workspace.experiment_workspace)
     scientist = AIScientistExperimentRunner(
-        project_root, provider, docker_runner, require_dynamic_audit=repair_dynamic
+        project_root, provider, docker_runner, require_dynamic_audit=repair_dynamic,
+        fixed_control_repair=fixed_control_repair,
     )
 
     cfg = OmegaConf.load(project_root / "vendor/AI-Scientist-v2/bfts_config.yaml")

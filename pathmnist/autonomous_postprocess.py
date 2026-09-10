@@ -206,8 +206,12 @@ def run_postprocess(project_root: Path, state_root: Path, task_id: str) -> dict[
     if backend(task) == 'upstream_v2':
         return run(project_root,task_root,analysis,provider)
     context = json.dumps(analysis, ensure_ascii=False, indent=2)
+    dataset_name = str(
+        evidence.get("dataset", {}).get("dataset_name") or "the supplied dataset"
+    )
     paper_prompt = (
-        "Write a rigorous English research paper in Markdown for this completed pathology AI study. "
+        f"Write a rigorous English research paper in Markdown for this completed supervised "
+        f"image-classification study on {dataset_name}. "
         "Use only the supplied evidence, distinguish validation from test, define every metric, and "
         "honor test_metric_semantics exactly; never claim that the sealed test was not evaluated. "
         "Use contract_results to state whether the pre-specified hypothesis was supported; a completed but unmet threshold is a valid negative result and must not be rewritten as success. "

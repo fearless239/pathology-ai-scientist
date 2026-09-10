@@ -11,6 +11,14 @@ METHOD_SPEC_PREFIX = "# PATH_AI_METHOD_SPEC: "
 
 CONCEPT_ALIASES: dict[str, set[str]] = {
     "label_smoothing": {"labelsmoothing", "smoothedtargets", "smoothingalpha", "smoothingfactor"},
+    "class_weighted_loss": {
+        "classweightedloss",
+        "classweightedcrossentropy",
+        "weightedcrossentropy",
+        "classweights",
+        "inversefreqweights",
+        "inversefrequencyweights",
+    },
     "color_perturbation": {
         "colorjitter",
         "colourjitter",
@@ -46,6 +54,11 @@ SIGNAL_CONCEPTS = {
     "confidence": "hard_example_mining",
     "contrastive": "contrastive_learning",
     "temperature": "contrastive_learning",
+    "class_weights": "class_weighted_loss",
+    "inverse_freq_weights": "class_weighted_loss",
+    "inverse_frequency_weights": "class_weighted_loss",
+    "weighted_cross_entropy": "class_weighted_loss",
+    "class_weighted_loss": "class_weighted_loss",
 }
 
 GENERIC_COMPONENT_CATEGORIES = {
@@ -58,18 +71,42 @@ GENERIC_COMPONENT_CATEGORIES = {
     "trainingtransform",
     "cnnarchitecture", "dataloading", "classificationmetrics", "sgd",
     "supervisedtraining", "smoothingfactortuning", "evaluation", "training",
+    "hyperparametersearch",
+    # Experimental controls describe reproducibility/policy metadata. They are
+    # valid MethodSpec vocabulary, but never count as evidence that an approved
+    # intervention was implemented.
+    "trainingcontrol", "experimentcontrol", "trainingpolicy", "earlystopping",
+    "checkpointselection", "reproducibilitycontrol",
 }
 
-REQUIREMENT_OWNERS = {'convlayers': 'architecture', 'fromscratch': 'initialization',
-                      'numclasses': 'architecture', 'trainsubsetfraction': 'data',
-                      'testaccuracy': 'evaluation', 'crossentropy': 'loss'}
+REQUIREMENT_OWNERS = {
+    'convlayers': 'architecture', 'conv2d': 'architecture',
+    'fromscratch': 'initialization', 'numclasses': 'architecture',
+    'trainsubsetfraction': 'data', 'testaccuracy': 'evaluation',
+    'crossentropy': 'loss', 'crossentropyloss': 'loss',
+    'pairedseeds': 'reproducibility', 'fixedseeds': 'reproducibility',
+    'sealedtesteval': 'evaluation', 'sealedtestevaluation': 'evaluation',
+    'earlystoppingpatience': 'training_control',
+    'fixedoptimizer': 'optimization', 'fixedlearningrate': 'optimization',
+    'fixedbatchsize': 'training_control', 'fixedepochcap': 'training_control',
+    'nopretrain': 'initialization', 'nopretrainedweights': 'initialization',
+    'noadditionaldata': 'data', 'fixeddatapipeline': 'data',
+    'samearchitecture': 'architecture', 'validationonly': 'evaluation',
+}
 
 
 def known_component_category(category: str) -> bool:
     """Classify metadata, never use it as evidence of an implemented method."""
     normalized = normalize_symbol(category)
-    if (normalized in GENERIC_COMPONENT_CATEGORIES or normalized in REQUIREMENT_OWNERS
-            or canonical_concept(category) in CONCEPT_ALIASES):
+    requirement_categories = {
+        normalize_symbol(owner) for owner in REQUIREMENT_OWNERS.values()
+    }
+    if (
+        normalized in GENERIC_COMPONENT_CATEGORIES
+        or normalized in REQUIREMENT_OWNERS
+        or normalized in requirement_categories
+        or canonical_concept(category) in CONCEPT_ALIASES
+    ):
         return True
     # Only compose tuning with a recognized concept/parameter, not arbitrary names.
     if normalized.endswith('tuning'):
@@ -98,7 +135,10 @@ def dynamic_smoothing_lines(tree):
 
 def classify_requirements(signals):
     """Read-only projection: legacy mixed signals retain their separate owners."""
-    result = {'intervention': [], 'architecture': [], 'initialization': [], 'data': [], 'evaluation': [], 'loss': []}
+    result = {
+        'intervention': [],
+        **{owner: [] for owner in sorted(set(REQUIREMENT_OWNERS.values()))},
+    }
     for signal in signals:
         owner = REQUIREMENT_OWNERS.get(normalize_symbol(signal), 'intervention')
         result[owner].append(signal)
@@ -311,6 +351,36 @@ def semantic_report(
         custom = custom_smoothing_classes(code)
         lines.extend(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Call) and _call_name(n.func) in custom)
         evidence["label_smoothing"] = lines
+    if "class_weighted_loss" in required:
+        weighted_lines = [
+            line
+            for normalized, _, line in normalized_calls
+            if line > 0
+            and any(
+                token in normalized
+                for token in (
+                    "weightedcrossentropy",
+                    "classweightedcrossentropy",
+                    "classweightedloss",
+                )
+            )
+        ]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = normalize_symbol(_call_name(node.func) or "")
+            if not name.endswith(("crossentropyloss", "crossentropy")):
+                continue
+            if any(
+                keyword.arg == "weight"
+                and not (
+                    isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is None
+                )
+                for keyword in node.keywords
+            ):
+                weighted_lines.append(node.lineno)
+        evidence["class_weighted_loss"] = sorted(set(weighted_lines))
     # Structural contract fields are not necessarily function names.
     if "num_classes" in required:
         evidence["num_classes"] = sorted({node.lineno for node in ast.walk(tree)

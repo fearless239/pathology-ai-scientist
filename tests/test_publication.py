@@ -1,3 +1,5 @@
+import pytest
+
 from pathmnist.publication import (
     normalize_publication_language,
     publication_candidate,
@@ -31,3 +33,17 @@ def test_internal_workflow_terms_are_normalized() -> None:
 def test_publication_candidate_excludes_internal_identity() -> None:
     result = publication_candidate({"experiment_id": "abc", "code_sha256": "secret", "frozen_at": "now", "primary_metric": "macro_f1", "validation_value": 0.9})
     assert result == {"primary_metric": "macro_f1", "validation_value": 0.9}
+
+
+def test_publication_profile_exposes_reproducible_class_derivations() -> None:
+    result = publication_dataset_profile(
+        {
+            "name": "binary",
+            "class_counts": {"train": {"0": 1214, "1": 3494}},
+            "split_counts": {"train": 4708},
+        }
+    )
+    derived = result["derived_class_statistics"]["train"]
+    assert derived["total_samples"] == 4708
+    assert derived["max_to_min_class_count_ratio"] == pytest.approx(3494 / 1214)
+    assert derived["class_prevalence"]["1"] == pytest.approx(3494 / 4708)

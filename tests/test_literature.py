@@ -36,6 +36,19 @@ def test_crossref_normalization_requires_stable_doi():
     assert paper["year"] == 2025
 
 
+def test_pneumonia_xray_reference_is_directly_relevant():
+    status, reason = literature.assess_reference(
+        {
+            "title": "Pneumonia classification from chest X-ray images",
+            "authors": "A. Researcher",
+            "year": 2024,
+            "doi": "10.1/pneumonia",
+        }
+    )
+    assert status == "directly_relevant"
+    assert reason == "pathology_or_medical_imaging"
+
+
 def test_relevance_filter_rejects_non_articles_off_topic_results_and_versions():
     papers = [
         {"title": "Review for a pathology classifier", "authors": "Reviewer", "year": 2025, "doi": "10.1/x/review1"},

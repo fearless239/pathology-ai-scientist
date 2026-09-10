@@ -15,6 +15,35 @@ from pathmnist.dataset_adapter import DatasetAdapter
 from pathmnist.research_contract import generate_contract, write_contract
 
 
+def test_inference_plot_guard_only_ignores_empty_history_dimension_error():
+    from pathmnist.autonomous_test import _with_inference_plot_guard
+
+    namespace = {}
+    source = """
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+ax.plot([0], [])
+completed = True
+"""
+    exec(_with_inference_plot_guard(source), namespace)
+    assert namespace["completed"] is True
+
+    with pytest.raises(ValueError, match="same first dimension"):
+        exec(_with_inference_plot_guard("import matplotlib.pyplot as plt\nplt.plot([0, 1], [1])"), {})
+
+
+def test_frozen_inference_guard_scopes_pytorch_26_compatibility_to_verified_mount():
+    from pathmnist.autonomous_test import _with_inference_plot_guard
+
+    wrapped = _with_inference_plot_guard("torch.load('/workspace/model_checkpoint.pt')")
+    assert 'checkpoint_path == "/workspace/model_checkpoint.pt"' in wrapped
+    assert '"weights_only" not in kwargs' in wrapped
+    assert 'kwargs["weights_only"] = False' in wrapped
+    assert wrapped.rstrip().endswith("torch.load('/workspace/model_checkpoint.pt')")
+
+
 def test_freeze_uses_fulfillment_identity_not_highest_draft():
     rows = [{'experiment_id': name, 'seed': 0,
              'contract_role': 'baseline' if name == 'baseline' else 'proposed_method'}
@@ -31,6 +60,10 @@ def test_freeze_uses_fulfillment_identity_not_highest_draft():
 @pytest.mark.parametrize('data_mode,full_work', [('npz', False), ('imagefolder', False), ('patient_manifest', False), ('npz', True)])
 @pytest.mark.parametrize('primary_metric', ['accuracy', 'macro_f1', 'class_f1', 'confusion_pair_mean_f1'])
 def test_real_upstream_generation_execution_and_resume(project_root, tmp_path, monkeypatch, repeats, data_mode, full_work, primary_metric):
+    # Upstream serializes experiment-result paths relative to the active run root.
+    # Keep this synthetic external-state workspace as the process working directory
+    # so its node round-trip matches the real runner contract.
+    monkeypatch.chdir(tmp_path)
     source = tmp_path / 'data.npz'
     np.savez(source, **{f'{split}_{kind}': np.zeros((2, 8, 8, 3), dtype=np.uint8)
                         if kind == 'images' else np.array([0, 1])

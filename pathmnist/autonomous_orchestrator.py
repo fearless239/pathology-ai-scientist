@@ -126,6 +126,37 @@ class ResearchOrchestrator:
                 exported = export_journals(self.project_root, self.state_root, self.task_id)
                 semantic_review = review_implementation_semantics(self.project_root, self.task_root)
                 fulfillment = evaluate_fulfillment(self.task_root, require_semantic_review=True)
+                semantic_control_errors = [
+                    str(error)
+                    for error in semantic_review.get(
+                        "deterministic_control_violations", []
+                    )
+                ]
+                control_errors = [
+                    error for error in fulfillment["errors"]
+                    if "baseline/proposed fixed controls differ:" in error
+                ]
+                if (
+                    allow_paid
+                    and (
+                        semantic_control_errors
+                        or (
+                            control_errors
+                            and len(control_errors) == len(fulfillment["errors"])
+                        )
+                    )
+                ):
+                    from .autonomous_paid import run_paid
+                    repair_errors = semantic_control_errors or control_errors
+                    run_paid(
+                        self.project_root,
+                        self.state_root,
+                        self.task_id,
+                        fixed_control_repair="; ".join(repair_errors),
+                    )
+                    exported = export_journals(self.project_root, self.state_root, self.task_id)
+                    semantic_review = review_implementation_semantics(self.project_root, self.task_root)
+                    fulfillment = evaluate_fulfillment(self.task_root, require_semantic_review=True)
                 if not fulfillment["passed"]:
                     diagnosis_root = self.task_root / "paper/failure_diagnosis"
                     diagnosis_root.mkdir(parents=True, exist_ok=True)
@@ -212,8 +243,14 @@ def main() -> int:
     parser.add_argument("--state-root", type=Path, default=Path("state/workflow"))
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--dataset-path", type=Path)
+    parser.add_argument(
+        "--dataset-adapter",
+        default="generic",
+        help="Built-in 'generic' adapter or trusted package.module:AdapterClass",
+    )
     parser.add_argument("--direction")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--budget-limit-usd", type=float, default=10.0)
     parser.add_argument("--allow-paid", action="store_true")
     parser.add_argument("--allow-test", action="store_true")
     parser.add_argument("--allow-pdf", action="store_true")
@@ -227,8 +264,10 @@ def main() -> int:
             state_root=args.state_root,
             task_id=args.task_id,
             dataset_path=args.dataset_path,
+            dataset_adapter=args.dataset_adapter,
             direction=args.direction,
             seed=args.seed,
+            budget_limit_usd=args.budget_limit_usd,
             resume=False,
         ))
         print(json.dumps(result, ensure_ascii=False, indent=2))

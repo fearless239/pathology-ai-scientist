@@ -78,6 +78,17 @@ def test_probability_rows_must_match_classes_and_be_normalized(tmp_path):
         )
 
 
+def test_missing_sample_fails_before_any_receipt_is_written(tmp_path):
+    output = tmp_path / "integrity"
+    with pytest.raises(IntegrityError, match="Missing"):
+        record_trusted_evaluation(
+            profile_path=_profile(tmp_path / "profile.json"), split="validation",
+            sample_ids=["validation:0"], targets=[0], predictions=[0], probabilities=None,
+            code_sha256="b" * 64, output_dir=output,
+        )
+    assert not (output / "trusted_metrics.json").exists()
+
+
 def test_synthetic_policy_blocks_dataset_replacement_but_allows_augmentation():
     with pytest.raises(IntegrityError, match="Randomly generated data"):
         validate_no_synthetic_dataset("import numpy as np\ntrain_data = np.random.rand(10, 4)\n")

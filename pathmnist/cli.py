@@ -96,9 +96,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     autonomous_init.add_argument("--state-root", type=Path, default=Path("state/workflow"))
     autonomous_init.add_argument("--task-id", required=True)
+    autonomous_init.add_argument(
+        "--dataset-adapter",
+        default="generic",
+        help="Built-in 'generic' adapter or trusted package.module:AdapterClass",
+    )
     autonomous_init.add_argument("--dataset-path", type=Path, required=True)
     autonomous_init.add_argument("--direction", required=True)
     autonomous_init.add_argument("--seed", type=int, default=7)
+    autonomous_init.add_argument("--budget-limit-usd", type=float, default=10.0)
     autonomous_init.add_argument(
         "--resume", action="store_true", help="Validate and repair metadata for an existing v2 task"
     )
@@ -470,7 +476,10 @@ def _framework_smoke(args: argparse.Namespace) -> dict[str, object]:
 
 def _autonomous_init(args: argparse.Namespace) -> dict[str, object]:
     from .autonomous import AutonomousTaskWorkspace, V2_STAGES, pathology_task_description
-    from .dataset_adapter import DatasetAdapter
+    from .dataset_adapter import (
+        load_dataset_adapter,
+        normalize_dataset_adapter_identifier,
+    )
 
     state_root = args.state_root.resolve()
     workspace = AutonomousTaskWorkspace.create(state_root, args.task_id)
@@ -484,7 +493,24 @@ def _autonomous_init(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError("--resume cannot convert a legacy task")
         if existing.get("research_direction") != args.direction.strip():
             raise RuntimeError("Existing task research direction differs from --direction")
-    spec = DatasetAdapter(seed=args.seed).discover(
+    requested_adapter = normalize_dataset_adapter_identifier(
+        getattr(args, "dataset_adapter", "generic")
+    )
+    if existing:
+        existing_adapter = normalize_dataset_adapter_identifier(
+            existing.get("dataset_adapter", "generic")
+        )
+        if requested_adapter != existing_adapter:
+            raise RuntimeError(
+                "Existing task dataset adapter differs from --dataset-adapter; "
+                "create a new task instead"
+            )
+        requested_adapter = existing_adapter
+    adapter = load_dataset_adapter(requested_adapter, seed=args.seed)
+    requested_budget = float(getattr(args, "budget_limit_usd", 10.0))
+    if requested_budget <= 0:
+        raise RuntimeError("--budget-limit-usd must be positive")
+    spec = adapter.discover(
         args.dataset_path.resolve(), workspace.dataset / "dataset_profile.json"
     )
     research_view = workspace.dataset / "research_view"
@@ -502,8 +528,11 @@ def _autonomous_init(args: argparse.Namespace) -> dict[str, object]:
         "task_type": "autonomous_experiment",
         "publication_backend": existing.get("publication_backend", "legacy_local") if existing else "upstream_v2",
         "task_id": args.task_id,
+        "dataset_adapter": requested_adapter,
         "research_direction": args.direction.strip(),
-        "budget_limit_usd": 8.0,
+        "budget_limit_usd": (
+            existing.get("budget_limit_usd", 8.0) if existing else requested_budget
+        ),
         "dataset_profile": "dataset/dataset_profile.json",
         "research_dataset": "dataset/research_view",
         "seed": args.seed,
@@ -521,6 +550,7 @@ def _autonomous_init(args: argparse.Namespace) -> dict[str, object]:
         "task_id": args.task_id,
         "completed_stage": "dataset_validated",
         "dataset_name": spec.name,
+        "dataset_adapter": requested_adapter,
         "source_type": spec.source_type,
         "classes": spec.classes,
         "split_counts": spec.split_counts,

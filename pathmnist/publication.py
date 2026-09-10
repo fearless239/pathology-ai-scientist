@@ -17,6 +17,29 @@ def publication_dataset_profile(profile: dict[str, Any]) -> dict[str, Any]:
         'experiment manifest. Resizing the supplied images is allowed; when sizes differ, describe '
         'the resizing explicitly and never claim the source images were originally at the model input resolution.'
     )
+    derived = {}
+    for split, raw_counts in result.get("class_counts", {}).items():
+        if not isinstance(raw_counts, dict):
+            continue
+        counts = {
+            str(label): int(count)
+            for label, count in raw_counts.items()
+            if type(count) is int and count >= 0
+        }
+        total = sum(counts.values())
+        positive = [count for count in counts.values() if count > 0]
+        if not counts or total <= 0 or not positive:
+            continue
+        derived[str(split)] = {
+            "total_samples": total,
+            "class_prevalence": {
+                label: count / total for label, count in counts.items()
+            },
+            "max_to_min_class_count_ratio": max(positive) / min(positive),
+            "derivation": "computed exactly from class_counts for manuscript reporting",
+        }
+    if derived:
+        result["derived_class_statistics"] = derived
     return result
 
 

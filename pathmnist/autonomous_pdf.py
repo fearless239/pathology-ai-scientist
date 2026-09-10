@@ -19,6 +19,25 @@ from pathmnist.execution_control import task_operation
 RUNNER_IMAGE = "path-scientist-gate-a-runner:0.2"
 
 
+def _pdf_quality_problems(log: str) -> list[str]:
+    """Return actionable, de-duplicated LaTeX quality diagnostics."""
+    problems: list[str] = []
+    for line in log.splitlines():
+        stripped = line.strip()
+        if re.search(r"LaTeX Warning: Citation .* undefined", stripped):
+            problems.append(stripped)
+        elif "LaTeX Warning: There were undefined references" in stripped:
+            problems.append(stripped)
+        else:
+            overfull = re.search(
+                r"Overfull \\hbox \(([0-9]+(?:\.[0-9]+)?)pt too wide\)",
+                stripped,
+            )
+            if overfull and float(overfull.group(1)) >= 3.0:
+                problems.append(stripped)
+    return list(dict.fromkeys(problems))
+
+
 def _normalize_figure_references(markdown: str, figure_names: set[str]) -> str:
     """Map manifest figures to the copied directory and remove duplicate uses."""
     seen: set[str] = set()
@@ -113,12 +132,7 @@ def _compile(directory: Path, tex_name: str, *, xelatex: bool = False, bibtex: b
     log = (directory / Path(tex_name).with_suffix(".log")).read_text(
         encoding="utf-8", errors="replace"
     )
-    fatal_patterns = (
-        r"LaTeX Warning: Citation .* undefined",
-        r"LaTeX Warning: There were undefined references",
-        r"Overfull \\hbox \((?:[3-9]|\d{2,})\.",
-    )
-    problems = [pattern for pattern in fatal_patterns if re.search(pattern, log)]
+    problems = _pdf_quality_problems(log)
     if problems:
         raise RuntimeError(f"PDF quality gate failed for {tex_name}: {problems}")
     return log

@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from pathmnist.config import load_config
@@ -5,8 +7,10 @@ from pathmnist.data import DataValidationError, validate_dataset
 
 
 def test_config_and_dataset_validation(project_root):
+    if os.environ.get("PATH_AI_RUN_REAL_DATA_TESTS") != "1":
+        pytest.skip("set PATH_AI_RUN_REAL_DATA_TESTS=1 for manual real-data integration tests")
     if not (project_root / "pathmnist_64.npz").is_file():
-        pytest.skip("manual real-PathMNIST integration test; dataset is intentionally absent from Git")
+        pytest.skip("manual real-PathMNIST integration test requires pathmnist_64.npz")
     original = load_config(project_root / "configs/pathmnist_m4.yaml")
     dataset = type(original.dataset)(
         path=project_root / original.dataset.path,
@@ -21,8 +25,10 @@ def test_config_and_dataset_validation(project_root):
 
 
 def test_dataset_hash_mismatch_rejected(project_root):
+    if os.environ.get("PATH_AI_RUN_REAL_DATA_TESTS") != "1":
+        pytest.skip("set PATH_AI_RUN_REAL_DATA_TESTS=1 for manual real-data integration tests")
     if not (project_root / "pathmnist_64.npz").is_file():
-        pytest.skip("manual real-PathMNIST integration test; dataset is intentionally absent from Git")
+        pytest.skip("manual real-PathMNIST integration test requires pathmnist_64.npz")
     original = load_config(project_root / "configs/pathmnist_m4.yaml")
     dataset = type(original.dataset)(
         path=project_root / original.dataset.path,

@@ -34,7 +34,8 @@ OFF_TOPIC_TERMS = (
 )
 PATHOLOGY_TERMS = (
     "pathology", "pathological", "histopathology", "histopathological", "pathmnist",
-    "medical image", "tissue classification", "staining", "whole slide",
+    "medical image", "tissue classification", "staining", "whole slide", "chest x-ray",
+    "chest xray", "radiograph", "radiology", "pneumonia", "pneumoniamnist",
 )
 METHOD_TERMS = (
     "image classification", "computer vision", "convolution", "early exit",

@@ -32,6 +32,18 @@ def test_durable_response_recovers_ledger_settlement_once(tmp_path):
     assert ledger.snapshot().reserved_usd == 0
 
 
+def test_unknown_outcome_remains_reserved_and_can_later_settle(tmp_path):
+    ledger = BudgetLedger(tmp_path / "budget.json", 2.0)
+    ledger.reserve("uncertain", 0.7, {"role": "paper_writer"})
+    ledger.mark_outcome_unknown("uncertain", "read timeout")
+    record = ledger.request_record("uncertain")
+    assert record["state"] == "outcome_unknown"
+    assert ledger.snapshot().reserved_usd == 0.7
+    ledger.settle("uncertain", 0.2, {"prompt_tokens": 5})
+    assert ledger.snapshot().spent_usd == 0.2
+    assert ledger.snapshot().reserved_usd == 0
+
+
 def test_released_request_can_be_reserved_again(tmp_path):
     ledger = BudgetLedger(tmp_path / "budget.json", 2.0)
     assert ledger.reserve("request-retry", 0.5, {"role": "test"})

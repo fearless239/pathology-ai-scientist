@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pathmnist.method_spec import (
     attach_method_spec,
+    classify_requirements,
     extract_method_spec,
     normalize_symbol,
     parse_method_spec,
@@ -68,7 +69,12 @@ def test_actual_failed_contract_and_program_require_runtime_loss_verification():
     _validate_stage_semantics(code, '3_creative_research_1_first_attempt', signals)
 
 
-@pytest.mark.parametrize('category', ['cnn_architecture', 'data_loading', 'classification_metrics', 'sgd', 'supervised_training', 'smoothing_factor_tuning'])
+@pytest.mark.parametrize('category', [
+    'cnn_architecture', 'data_loading', 'classification_metrics', 'sgd',
+    'supervised_training', 'smoothing_factor_tuning', 'hyperparameter_search',
+    'training_control', 'experiment_control', 'training_policy', 'early_stopping',
+    'checkpoint_selection', 'reproducibility_control', 'initialization', 'data',
+])
 def test_normal_research_metadata_does_not_need_false_augmentation_labels(category):
     report = semantic_report('loss=nn.CrossEntropyLoss(label_smoothing=0.1)\nloss.backward()',
                              ['label_smoothing'], {'components': [{'category': category}]})
@@ -201,6 +207,18 @@ def test_label_smoothing_requires_positive_known_parameter(amount):
     assert not report['passed']
 
 
+def test_weighted_cross_entropy_is_detected_structurally():
+    code = """
+class_weights = compute_training_class_weights(train_labels)
+criterion = nn.CrossEntropyLoss(weight=class_weights)
+loss.backward()
+optimizer.step()
+"""
+    report = semantic_report(code, ["class_weights", "weighted_cross_entropy"])
+    assert report["passed"] is True
+    assert report["required"] == ["class_weighted_loss"]
+
+
 def test_loss_and_structure_are_not_filtered_as_dataset_transforms():
     code = '''
 train_dataset = TensorDataset(train_images, train_labels)
@@ -214,5 +232,44 @@ loss.backward()
     assert report['required'].count('label_smoothing') == 1
 
 
-def test_generic_category_does_not_satisfy_missing_intervention():
-    assert not semantic_report('loss.backward()', ['label_smoothing'], {'components':[{'category':'loss'}]})['passed']
+@pytest.mark.parametrize('category', ['loss', 'training_control', 'early_stopping'])
+def test_generic_category_does_not_satisfy_missing_intervention(category):
+    report = semantic_report(
+        'loss.backward()',
+        ['label_smoothing'],
+        {'components': [{'category': category}]},
+    )
+    assert report['unknown'] == []
+    assert report['missing'] == ['label_smoothing']
+    assert not report['passed']
+
+
+def test_mixed_contract_signals_separate_method_from_host_controls():
+    signals = [
+        'inverse_freq_weights',
+        'weighted_cross_entropy',
+        'paired_seeds',
+        'sealed_test_eval',
+        'early_stopping_patience',
+        'fixed_optimizer',
+        'no_pretrain',
+    ]
+
+    groups = classify_requirements(signals)
+
+    assert groups['intervention'] == [
+        'inverse_freq_weights', 'weighted_cross_entropy'
+    ]
+    assert groups['reproducibility'] == ['paired_seeds']
+    assert groups['evaluation'] == ['sealed_test_eval']
+    assert groups['training_control'] == ['early_stopping_patience']
+    assert groups['optimization'] == ['fixed_optimizer']
+    assert groups['initialization'] == ['no_pretrain']
+
+    report = semantic_report(
+        'criterion = nn.CrossEntropyLoss(weight=class_weights)\nloss.backward()',
+        groups['intervention'],
+    )
+    assert report['required'] == ['class_weighted_loss']
+    assert report['detected'] == ['class_weighted_loss']
+    assert report['passed']

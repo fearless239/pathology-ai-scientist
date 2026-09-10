@@ -86,6 +86,25 @@ def test_accuracy_augmentation_direction_is_preserved_exactly():
     }
 
 
+def test_binary_class_weighted_direction_uses_three_paired_seeds():
+    contract = generate_contract(
+        "比较普通交叉熵与加权交叉熵，以 macro-F1 为主指标，固定 3 个随机种子",
+        {"classes": ["normal", "pneumonia"]},
+        split_seed=7,
+    )
+    assert contract["metrics"]["primary"]["name"] == "macro_f1"
+    assert contract["repeat_plan"] == {
+        "count": 3,
+        "seeds": [0, 1, 2],
+        "fixed_split": True,
+        "split_seed": 7,
+    }
+    assert contract["interventions"][0]["implementation_signals"] == [
+        "class_weights",
+        "weighted_cross_entropy",
+    ]
+
+
 def test_unsupported_task_is_diagnosed_before_execution():
     contract = generate_contract("使用WSI进行生存分析", {"classes": ["a", "b"]})
     assert not contract["capability"]["supported"]
@@ -133,6 +152,11 @@ def test_structured_extraction_supports_a_different_classification_topic():
     assert contract["baseline"]["name"] == "ConvNeXt-Tiny"
     assert contract["metrics"]["primary"]["name"] == "weighted_f1"
     assert contract["repeat_plan"]["seeds"] == [0, 1, 2, 3]
+
+
+def test_missing_extraction_field_reports_validation_error_not_keyerror():
+    with pytest.raises(ResearchContractError, match="unsupported_reasons"):
+        contract_from_extraction("classification", {"classes": ["a", "b"]}, {"supported": True})
 
 
 def _fulfillment_fixture(root, *, omit_proposed_seed=None, proposed_gain=0.04):

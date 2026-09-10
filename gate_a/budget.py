@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,7 +76,7 @@ class BudgetLedger:
             reserved = sum(
                 float(item["reserved_usd"])
                 for item in data["requests"].values()
-                if item["state"] == "reserved"
+                if item["state"] in {"reserved", "outcome_unknown"}
             )
             available = max(0.0, self.hard_limit_usd - spent - reserved)
             return BudgetSnapshot(
@@ -89,8 +90,33 @@ class BudgetLedger:
         """Settle a durable response after a crash before ledger commit."""
         with self._lock:
             item = self._read()['requests'].get(request_id)
-            if item and item['state'] == 'reserved':
+            if item and item['state'] in {'reserved', 'outcome_unknown'}:
                 self.settle(request_id, metadata['actual_cost_usd'], metadata['usage'])
+
+    def request_record(self, request_id: str) -> dict[str, Any] | None:
+        """Return a defensive copy of one request record for recovery decisions."""
+        with self._lock:
+            item = self._read()["requests"].get(request_id)
+            return deepcopy(item) if item is not None else None
+
+    def mark_outcome_unknown(self, request_id: str, reason: str) -> None:
+        """Preserve an uncertain request at its full reservation until reconciled.
+
+        Unknown provider outcomes are intentionally neither released nor reported as
+        actual spend.  They continue to reduce the available budget, so a separately
+        authorized recovery attempt cannot exceed the task hard limit.
+        """
+        with self._lock:
+            data = self._read()
+            item = data["requests"].get(request_id)
+            if not item or item["state"] not in {"reserved", "outcome_unknown"}:
+                return
+            item.update(
+                state="outcome_unknown",
+                outcome_unknown_at=item.get("outcome_unknown_at") or _utc_now(),
+                outcome_unknown_reason=reason[:500],
+            )
+            _atomic_json_write(self.path, data)
 
     @classmethod
     def open_or_upgrade(cls, path: Path, hard_limit_usd: float) -> "BudgetLedger":
@@ -125,7 +151,7 @@ class BudgetLedger:
                 if existing["state"] == "settled":
                     return False
                 if (
-                    existing["state"] == "reserved"
+                    existing["state"] in {"reserved", "outcome_unknown"}
                     and float(existing["reserved_usd"]) == amount
                 ):
                     return False
@@ -153,7 +179,7 @@ class BudgetLedger:
         with self._lock:
             data = self._read()
             item = data["requests"].get(request_id)
-            if not item or item["state"] != "reserved":
+            if not item or item["state"] not in {"reserved", "outcome_unknown"}:
                 raise LedgerError(f"Cannot settle unreserved request {request_id!r}")
             if actual < 0 or actual > float(item["reserved_usd"]) + 1e-8:
                 raise LedgerError(

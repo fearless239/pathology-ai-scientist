@@ -24,7 +24,13 @@ from .code_response import query_program
 from .tuning_evidence import select_verified_tuning, validate_tuning_record
 from .stage_policy import ExperimentExecutionBudget, POLICIES, stage_policy
 from .training_budget import training_workload
-from .experiment_manifest import ManifestError, TRAINING_POLICY_PROMPT, load_manifest
+from .experiment_manifest import (
+    ManifestError,
+    TRAINING_POLICY_PROMPT,
+    load_manifest,
+    normalize_generated_manifest_fields,
+    validate_generated_manifest_fields,
+)
 from .method_spec import (
     attach_method_spec,
     extract_method_spec,
@@ -32,6 +38,7 @@ from .method_spec import (
     parse_method_spec,
     semantic_report,
     classify_requirements,
+    known_component_category,
 )
 from .scientific_integrity import IntegrityError, record_trusted_evaluation, validate_no_synthetic_dataset
 from .autonomous_stages import V2_STAGES as V2_STAGES
@@ -42,7 +49,9 @@ class AutonomousExperimentError(RuntimeError):
     pass
 
 
-def _check_repeated_preflight_failures(journal):
+def _check_repeated_preflight_failures(
+    journal, stage_name=None, signals=None, primary_metric=None
+):
     """Stop unchanged pre-execution failures before more paid generation."""
     recent = journal.nodes[-3:]
     if len(recent) < 3:
@@ -55,7 +64,74 @@ def _check_repeated_preflight_failures(journal):
         if node.is_buggy is not True or not text.startswith(prefix):
             return
         reasons.append(text[len(prefix):].split(":", 1)[0].strip())
+    # A policy fix can make preserved preflight failures valid. Recheck their code
+    # instead of deleting journal history or permanently blocking task recovery.
+    if stage_name and signals is not None and all(
+        reason == "Baseline stage implements intervention signals" for reason in reasons
+    ):
+        try:
+            for node in recent:
+                _validate_stage_semantics(node.code, stage_name, list(signals))
+        except IntegrityError:
+            pass
+        else:
+            return
+    if (
+        stage_name
+        and signals is not None
+        and all(
+            reason == "Proposed-method code needs review for unknown components"
+            for reason in reasons
+        )
+        and all(
+            semantic_report(
+                node.code, list(signals), extract_method_spec(node.code)
+            ).get("status")
+            != "needs_review"
+            for node in recent
+        )
+    ):
+        # A taxonomy update resolved every formerly unknown category. Preserve
+        # the failed attempts, but allow bounded regeneration under the current
+        # validator instead of permanently replaying a stale checkpoint error.
+        return
+    if (
+        stage_name
+        and signals is not None
+        and len(set(reasons)) == 1
+        and reasons[0].startswith(
+            "Proposed-method stage does not implement every approved intervention signal"
+        )
+        and semantic_report(
+            recent[-1].code,
+            list(signals),
+            extract_method_spec(recent[-1].code),
+        ).get("passed")
+    ):
+        # Contract-signal ownership may have moved fixed controls out of the
+        # intervention set. Revalidate the newest preserved repair against the
+        # current projection before deciding that generation is stuck.
+        return
     if len(set(reasons)) == 1:
+        if reasons[0] == (
+            "Generated experiment_manifest is missing primary_metric; "
+            "fix metadata before training"
+        ):
+            # This pre-execution failure may predate host-side normalization.
+            # Only reopen the journal when every preserved program can be
+            # normalized from the currently approved contract without guessing.
+            try:
+                if not primary_metric:
+                    raise ManifestError("Approved primary metric is missing")
+                for node in recent:
+                    normalized = normalize_generated_manifest_fields(
+                        node.code, str(primary_metric)
+                    )
+                    validate_generated_manifest_fields(normalized)
+            except (ManifestError, SyntaxError):
+                pass
+            else:
+                return
         raise AutonomousExperimentError(
             "REPEATED_PREFLIGHT_BLOCKED: three consecutive pre-execution failures: "
             + reasons[0] + "; review the contract/code before resuming; no further automatic retries"
@@ -75,11 +151,61 @@ def _write_agent_progress(root, stage, journal, history):
     temporary.replace(target)
 
 
+def _inherited_stage_node_ids(journals, stage_history, stage_name: str) -> set[str]:
+    """Return nodes copied into this stage from its immediate predecessor.
+
+    Upstream intentionally seeds a new stage with the previous stage's best
+    node. Preserved nodes retain their original role and must not be reclassified
+    as newly generated code for the destination stage during checkpoint recovery.
+    """
+    transition = next(
+        (
+            item
+            for item in reversed(stage_history)
+            if getattr(item, "to_stage", None) == stage_name
+        ),
+        None,
+    )
+    if transition is None:
+        return set()
+    previous = journals.get(getattr(transition, "from_stage", None))
+    if previous is None:
+        return set()
+    return {str(node.id) for node in previous.nodes}
+
+
+def _canonical_repeat_parameters(parameters: Any, learning_rate: Any) -> dict[str, Any]:
+    """Compare substantive method parameters independently of the LR alias.
+
+    ``learning_rate`` is already a required top-level manifest field. Some
+    generated programs additionally duplicate it as ``selected_learning_rate``
+    only after a search, then omit that duplicate in repeat mode. Accept that
+    representational difference only when the duplicate agrees exactly with the
+    authoritative top-level value; every other parameter remains strict.
+    """
+    if not isinstance(parameters, dict):
+        raise IntegrityError("selected_parameters must be a JSON object")
+    normalized = dict(parameters)
+    duplicate = normalized.pop("selected_learning_rate", None)
+    if duplicate is not None:
+        if (
+            isinstance(duplicate, bool)
+            or isinstance(learning_rate, bool)
+            or not isinstance(duplicate, (int, float))
+            or not isinstance(learning_rate, (int, float))
+            or float(duplicate) != float(learning_rate)
+        ):
+            raise IntegrityError(
+                "selected_learning_rate disagrees with manifest learning_rate"
+            )
+    return normalized
+
+
 DEFAULT_EXPERIMENT_BUDGET = ExperimentExecutionBudget()
 SINGLE_CONDITION_BUDGET = ExperimentExecutionBudget(
     max_conditions=1, max_total_epochs=15
 )
-EXECUTION_POLICY_REVISION = "host-metrics-purpose-boundary-v2"
+EXECUTION_POLICY_REVISION = "contract-signal-ownership-v4"
 # Compatibility aliases for callers added during the beta hardening cycle.
 TuningExecutionBudget = ExperimentExecutionBudget
 DEFAULT_TUNING_BUDGET = DEFAULT_EXPERIMENT_BUDGET
@@ -128,14 +254,17 @@ def _allowed_contract_roles(stage_name: str) -> set[str]:
 
 def _validate_stage_semantics(code: str, stage_name: str, signals: list[str]) -> None:
     """Reject contract-role leakage before an expensive sandbox execution."""
+    validate_generated_manifest_fields(code)
     role = _expected_contract_role(stage_name)
     method_spec = extract_method_spec(code)
     evidence = semantic_report(code, signals, method_spec)
     implemented = [signal for signal, lines in evidence.get("signals", {}).items() if lines]
-    generic_preprocessing = {"transform", "transforms", "augmentation", "augment",
-                             "conv1", "conv2", "conv3", "cross_entropy", "num_classes"}
+    requirement_groups = classify_requirements(signals)
+    intervention_only = {
+        signal.casefold() for signal in requirement_groups["intervention"]
+    }
     baseline_interventions = [
-        signal for signal in implemented if signal.casefold() not in generic_preprocessing
+        signal for signal in implemented if signal.casefold() in intervention_only
     ]
     if role == "baseline" and baseline_interventions:
         raise IntegrityError(
@@ -477,6 +606,7 @@ def pathology_task_description(
     if not direction.strip():
         raise AutonomousExperimentError("Research direction is required")
     profile = {
+        "name": spec.name,
         "source_type": spec.source_type,
         "image_shape": spec.image_shape,
         "channels": spec.channels,
@@ -485,7 +615,7 @@ def pathology_task_description(
         "recommended_metrics": spec.recommended_metrics,
         "warnings": spec.warnings,
     }
-    title = "Agent-designed supervised pathology image classification study"
+    title = f"Agent-designed supervised image classification study on {spec.name}"
     abstract = direction.strip()
     short_hypothesis = direction.strip()
     contract_experiments = None
@@ -505,6 +635,9 @@ def pathology_task_description(
             "hard": "hard-example mining",
             "contrastive": "supervised contrastive learning",
             "temperature": "temperature-scaled contrastive loss",
+            "class_weights": "training-set class weights",
+            "weighted_cross_entropy": "class-weighted cross-entropy",
+            "class_weighted_loss": "class-weighted cross-entropy",
         }
         components = [
             signal_names[signal]
@@ -528,8 +661,9 @@ def pathology_task_description(
             "training controls, and paired seeds."
         )
         abstract = (
-            f"This study tests data augmentation for {dataset_name} {len(spec.classes)}-class "
-            f"classification using {baseline_name}. The intervention combines {method_summary}. "
+            f"This study tests a controlled intervention for {dataset_name} "
+            f"{len(spec.classes)}-class classification using {baseline_name}. "
+            f"The intervention is {method_summary}. "
             f"Baseline and intervention results are compared on the validation split using paired "
             f"seeds {seeds}, with {primary} as the primary metric. Candidate selection never accesses "
             "the sealed test split; one approved held-out evaluation is reserved for final confirmation."
@@ -558,12 +692,24 @@ def pathology_task_description(
             "Risk Factors and Limitations": [
                 "The test split is not mounted and must never be requested or reconstructed.",
                 "Do not download or use another dataset.",
-                "Do not make clinical claims from patch-level classification.",
+                "Do not make clinical claims from this research classification task.",
             ],
             "Dataset Profile": profile,
             "Image preprocessing": {
                 "source_image_shape": spec.image_shape,
                 "instruction": "The source resolution may differ from the required model input. Resize consistently in train, validation and inference preprocessing. Preserve original dataset identity and report source resolution, model input resolution and interpolation; never describe resized data as originally acquired at the target resolution.",
+            },
+            "Classification Interface": {
+                "input_channels": spec.channels,
+                "class_names": spec.classes,
+                "num_classes": len(spec.classes),
+                "required_output": (
+                    "two logits followed by normalized two-class probabilities"
+                    if len(spec.classes) == 2
+                    else f"{len(spec.classes)} logits followed by normalized probabilities"
+                ),
+                "metrics": spec.recommended_metrics,
+                "instruction": "Derive input channels and class count from this profile; do not hard-code PathMNIST's three channels or nine classes.",
             },
             "Approved Research Execution Contract": contract,
             "Requirement classification": (
@@ -622,7 +768,12 @@ class GatewayQueryAdapter:
         fingerprint = hashlib.sha256(
             (system + "\n" + prompt + "\n" + str(getattr(func_spec, "name", "text"))).encode("utf-8")
         ).hexdigest()[:20]
-        role = "experiment_code" if func_spec is None else "ideation"
+        # Upstream uses the code model argument for both program generation and
+        # short planning calls. Route the latter by intent: these responses only
+        # name a tuning/ablation idea and contain no executable code.
+        planning_markers = ("HYPERPARAM NAME:", "ABLATION NAME:")
+        is_planning_call = any(marker in system for marker in planning_markers)
+        role = "ideation" if func_spec is not None or is_planning_call else "experiment_code"
         role_config = getattr(getattr(self.provider, "config", None), "roles", {}).get(role)
         output_limit = getattr(role_config, "max_output_tokens", "default")
         # The occurrence suffix prevents upstream's extraction retries from
@@ -656,11 +807,12 @@ def _prompt_text(value: Any) -> str:
 class AIScientistExperimentRunner:
     """Run the pinned upstream AgentManager with documented reliability patches."""
 
-    def __init__(self, project_root: Path, provider: ChatProvider, docker_runner: DockerRunner, *, require_dynamic_audit: bool = False):
+    def __init__(self, project_root: Path, provider: ChatProvider, docker_runner: DockerRunner, *, require_dynamic_audit: bool = False, fixed_control_repair: str | None = None):
         self.project_root = project_root.resolve()
         self.provider = provider
         self.docker_runner = docker_runner
         self.require_dynamic_audit = require_dynamic_audit
+        self.fixed_control_repair = fixed_control_repair
         self.vendor_root = self.project_root / "vendor" / "AI-Scientist-v2"
         if not self.vendor_root.is_dir():
             raise AutonomousExperimentError("Vendored AI-Scientist-v2 is missing")
@@ -686,11 +838,15 @@ class AIScientistExperimentRunner:
         cfg.agent.repeat_seeds = contract['repeat_plan']['seeds']
         task_desc = pathology_task_description(direction, spec, contract, research_view=research_view)
         query_adapter = GatewayQueryAdapter(self.provider, task_id)
+        requirement_groups = classify_requirements(
+            contract["interventions"][0].get("implementation_signals", [])
+        )
         manager_class, agent_class, minimal_agent_class, interpreter_class = self._runtime_classes(
             research_view,
             validation_count=spec.split_counts["validation"],
-            intervention_signals=tuple(
-                contract["interventions"][0].get("implementation_signals", [])
+            intervention_signals=tuple(requirement_groups["intervention"]),
+            allow_method_search=bool(
+                contract.get("experiment_policy", {}).get("tuning", True)
             ),
         )
         checkpoint = workspace.experiment_logs / "manager.pkl"
@@ -719,6 +875,7 @@ class AIScientistExperimentRunner:
         research_view: Path,
         validation_count: int | None = None,
         intervention_signals: tuple[str, ...] = (),
+        allow_method_search: bool = True,
     ):
         # This method is also used by offline preflight and checkpoint recovery,
         # which may run before ``run`` has had a chance to prepare sys.path.
@@ -826,7 +983,7 @@ class AIScientistExperimentRunner:
                 base = super()._prompt_impl_guideline
                 base["Dataset and evidence constraints"] = [
                     "Keep intervention methods separate from architecture, initialization, data strategy and evaluation requirements. test_accuracy belongs to held-out evaluation only, never research training. Do not invent calls or rename metadata to satisfy a symbol checker.",
-                    "Prefer torch.nn.CrossEntropyLoss(label_smoothing=...) or torch.nn.functional.cross_entropy over a custom label-smoothing implementation. Custom losses require sandbox value, gradient and backward verification. Standard metadata categories such as cnn_architecture, data_loading and classification_metrics are valid; never relabel them as rotation or flip.",
+                    "Prefer torch.nn.CrossEntropyLoss(label_smoothing=...) or torch.nn.functional.cross_entropy over a custom label-smoothing implementation. Custom losses require sandbox value, gradient and backward verification. Standard non-intervention metadata categories include cnn_architecture, data_loading, classification_metrics, optimizer, training_control, early_stopping and checkpoint_selection; never relabel them as rotation, flip or another intervention.",
                     "Use only /dataset/dataset.npz or /dataset/manifest.json.",
                     "Use the exact exported keys in Research View Interface; source NPZ aliases do not apply to the mounted view. Inspect data.files before indexing.",
                     "Unconditional top-level imports are prechecked in the actual sandbox before any training. Use exact installed API names; an IMPORT_PREFLIGHT_FAILED diagnostic includes similar available names. Repair the API name, never replace the approved architecture or silently disable pretrained weights.",
@@ -834,11 +991,11 @@ class AIScientistExperimentRunner:
                     "Do not install packages or invoke subprocesses.",
                     "Write working/experiment_result.json with the standard metrics and test_data_accessed=false.",
                     "The result JSON must include metrics, predictions, targets, and sample_ids for the complete validation split; probabilities are optional. Load NPZ sample IDs from validation_sample_ids or preserve manifest IDs in evaluation order.",
-                    "Every program must support training and inference-only execution. For NPZ input define exactly `HAS_TRAIN_SPLIT = \"train_images\" in data.files` (or use an equivalent manifest split check), and never require train arrays when it is false.",
-                    "When HAS_TRAIN_SPLIT is true, train normally and save the final selected model to working/model_checkpoint.pt. When false, load /workspace/model_checkpoint.pt, skip all optimizer/training code, evaluate validation_* arrays only, and still export the complete per-sample result contract.",
+                    "Every program must support training and inference-only execution. For NPZ input define exactly `HAS_TRAIN_SPLIT = \"train_images\" in data.files` (or use an equivalent manifest split check), and never require train arrays when it is false. Normalize validation image layout independently of HAS_TRAIN_SPLIT; in particular, always add a channel axis to N,H,W grayscale batches before constructing the validation DataLoader.",
+                    "When HAS_TRAIN_SPLIT is true, train normally and save the final selected model to working/model_checkpoint.pt. Prefer a weights-only-compatible checkpoint containing state_dict tensors and Python primitives; convert NumPy arrays/scalars before torch.save. When false, load /workspace/model_checkpoint.pt with an explicit PyTorch weights_only choice, skip all optimizer/training code, evaluate validation_* arrays only, and still export the complete per-sample result contract.",
                     "The launcher checks actual image tensors at model entry against approved input sizes. Resize in preprocessing; reporting a different resolution in a manifest is not sufficient.",
                     "Inference is fail-closed: the required checkpoint must exist, torch.load must succeed and load_state_dict must completely restore the model before any image forward. Never fall back to random weights, suppress loading errors or continue after a MODEL_CONTRACT_FAILED error.",
-                    "Write working/experiment_manifest.json with schema_version=1 and exact dataset, model, optimizer, learning_rate, epochs, batch_size, seed, input_resolutions, selection_metric, and hardware fields.",
+                    "Write working/experiment_manifest.json with schema_version=1 and exact dataset, model, optimizer, learning_rate, epochs, max_epochs, batch_size, seed, input_resolutions, primary_metric, selection_metric, checkpoint_selection, early_stopping, training_runs, and hardware fields. primary_metric and selection_metric are separate required literal fields and must both equal the approved research metric.",
                     "Write working/contract_execution.json binding this run to the approved contract role and comparison ID, with the actual training seed. Do not claim a method component that is absent from the code.",
                     "Make the program seed-injectable: use an already-defined global `seed` when present and only default it when absent. Never overwrite the seed prepended by the multi-seed evaluator, and report that effective seed in every output manifest/result.",
                     "For tuning runs, the singular learning_rate is the validation-selected numeric value. " + TRAINING_POLICY_PROMPT,
@@ -948,6 +1105,9 @@ for name, value in result['metrics'].items():
                 )
                 if extract_method_spec(code) is None:
                     code = attach_method_spec(code, spec)
+                code = normalize_generated_manifest_fields(
+                    code, str(self.cfg.agent.contract_metric)
+                )
                 return plan, code
 
         class PathologyParallelAgent(PathologyPromptMixin, ParallelAgent):
@@ -1086,7 +1246,11 @@ for name, value in result['metrics'].items():
                     if hasattr(self, '_on_seed_completed'):
                         self._on_seed_completed()
                     if result_node.is_buggy is not False:
-                        raise AutonomousExperimentError(f'Repeat seed {seed} failed; completed seeds were preserved')
+                        details = "".join(result_node._term_out or []).strip()
+                        suffix = f": {details[-1200:]}" if details else ""
+                        raise AutonomousExperimentError(
+                            f'Repeat seed {seed} failed; completed seeds were preserved{suffix}'
+                        )
                     seed_nodes.append(self.journal.get_node_by_id(result_node.id))
                 return seed_nodes
 
@@ -1108,7 +1272,13 @@ for name, value in result['metrics'].items():
 
             def _get_task_desc_str(self):
                 description = super()._get_task_desc_str()
-                for name in ("Research View Interface", "Approved Research Execution Contract", "Requirement classification", "Image preprocessing"):
+                for name in (
+                    "Research View Interface",
+                    "Approved Research Execution Contract",
+                    "Requirement classification",
+                    "Image preprocessing",
+                    "Classification Interface",
+                ):
                     if self.task_desc.get(name) is not None:
                         description += "\n" + name + ":\n" + json.dumps(
                             self.task_desc[name], ensure_ascii=False
@@ -1127,22 +1297,68 @@ for name, value in result['metrics'].items():
 
             def _check_stage_completion(self, stage):
                 journal = self.journals[stage.name]
+                inherited_node_ids = _inherited_stage_node_ids(
+                    self.journals, getattr(self, "stage_history", []), stage.name
+                )
                 if stage.name.startswith('3_') and journal.nodes:
                     root = research_view.parent.parent
                     if (root / 'research/research_contract.json').exists():
                         from .comparison_policy import bind_policy
                         bind_policy(root, journal.nodes[0].code)
                 for existing in journal.nodes:
-                    if existing.is_buggy is True and 'needs review for unknown components:' in str(getattr(existing, 'term_out', '')):
-                        raise AutonomousExperimentError('SEMANTIC_REVIEW_REQUIRED: classify unsupported components before further generation; do not rename metadata to bypass review. ' + str(existing.term_out)[-800:])
+                    if (
+                        str(getattr(existing, "id", "")) not in inherited_node_ids
+                        and existing.is_buggy is True
+                        and 'needs review for unknown components:'
+                        in str(getattr(existing, 'term_out', ''))
+                    ):
+                        # Classification rules may have been corrected since this
+                        # checkpoint was written. Re-evaluate preserved code before
+                        # carrying an obsolete manual-review block forward.
+                        review_text = str(existing.term_out)
+                        listed = review_text.rsplit("unknown components:", 1)[-1]
+                        unknown = [
+                            item.strip()
+                            for item in listed.split(",")
+                            if item.strip() and not known_component_category(item.strip())
+                        ]
+                        try:
+                            _validate_stage_semantics(
+                                existing.code, stage.name, list(intervention_signals)
+                            )
+                        except IntegrityError as error:
+                            if unknown or "needs review for unknown components:" in str(error):
+                                raise AutonomousExperimentError(
+                                    'SEMANTIC_REVIEW_REQUIRED: classify unsupported components '
+                                    'before further generation; do not rename metadata to bypass review. '
+                                    + str(existing.term_out)[-800:]
+                                ) from error
+                        if unknown:
+                            raise AutonomousExperimentError(
+                                'SEMANTIC_REVIEW_REQUIRED: classify unsupported components '
+                                'before further generation; do not rename metadata to bypass review. '
+                                + review_text[-800:]
+                            )
                     if existing.is_buggy is True and 'ARTIFACT_REVIEW_REQUIRED:' in str(getattr(existing, 'term_out', '')):
                         raise AutonomousExperimentError(
                             'ARTIFACT_REVIEW_REQUIRED: completed training outputs were preserved in '
                             'experiment_logs/raw_executions; inspect and revalidate artifacts before authorizing '
                             'another training execution. ' + str(existing.term_out)[-800:])
-                _check_repeated_preflight_failures(journal)
+                contract_metric = getattr(
+                    getattr(getattr(self, "cfg", None), "agent", None),
+                    "contract_metric",
+                    "macro_f1",
+                )
+                _check_repeated_preflight_failures(
+                    journal,
+                    stage.name,
+                    intervention_signals,
+                    contract_metric,
+                )
                 if stage.name.startswith('2_'):
-                    node, errors = select_verified_tuning(journal, research_view.parent.parent, self.cfg.agent.contract_metric)
+                    node, errors = select_verified_tuning(
+                        journal, research_view.parent.parent, contract_metric
+                    )
                     if node is not None:
                         return True, 'Host verified tuning controls, histories and validation predictions'
                     if any('Missing immutable' in error or 'legacy evidence' in error for error in errors) or len(journal.nodes) >= stage.max_iterations:
@@ -1311,7 +1527,12 @@ for name, value in result['metrics'].items():
                     from .comparison_policy import read_policy, validate_final_plan
                     comparison_policy = read_policy(research_view.parent.parent) if self.stage_name.startswith('3_') else None
                     if comparison_policy:
-                        validate_final_plan(code, comparison_policy, POLICIES[3].budget)
+                        validate_final_plan(
+                            code,
+                            comparison_policy,
+                            POLICIES[3].budget,
+                            allow_search=allow_method_search,
+                        )
                     # A new run must not inherit an old worker's tuning receipt.
                     for name in ("tuning_evidence.json", "tuning_progress.json"):
                         (result_path.parent / name).unlink(missing_ok=True)
@@ -1331,7 +1552,13 @@ for name, value in result['metrics'].items():
                     )
                 except SandboxCleanupError:
                     raise
-                except (CodePolicyError, RunnerError, IntegrityError, OSError) as error:
+                except (
+                    CodePolicyError,
+                    RunnerError,
+                    IntegrityError,
+                    ManifestError,
+                    OSError,
+                ) as error:
                     # Invalid or policy-rejected LLM code is an experiment-node
                     # failure, not an orchestration failure. Returning it through
                     # the upstream interpreter contract lets the agent debug the
@@ -1482,8 +1709,19 @@ for name, value in result['metrics'].items():
                                 repeat = json.loads(repeat_match.group(1))
                                 if manifest['learning_rate'] != repeat['learning_rate']:
                                     raise IntegrityError('Repeat changed the selected learning rate')
-                                if manifest.get('selected_parameters', {}) != repeat['parameters']:
+                                reported_parameters = _canonical_repeat_parameters(
+                                    manifest.get('selected_parameters', {}),
+                                    manifest['learning_rate'],
+                                )
+                                expected_parameters = _canonical_repeat_parameters(
+                                    repeat['parameters'], repeat['learning_rate']
+                                )
+                                if reported_parameters != expected_parameters:
                                     raise IntegrityError('Repeat changed the selected method parameters')
+                                # Preserve the parent's exact representation for
+                                # downstream paired-control equality checks after
+                                # all substantive values have matched.
+                                manifest['selected_parameters'] = dict(repeat['parameters'])
                                 manifest['repeat_parent_code_sha256'] = repeat['parent_code_sha256']
                                 manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
                             if self.stage_name.startswith('2_') and not repeat_match:
@@ -1543,8 +1781,7 @@ for name, value in result['metrics'].items():
             pickle.dump(manager.__dict__, handle)
         temporary.replace(path)
 
-    @staticmethod
-    def _load_or_create_manager(path: Path, manager_class: type, task_desc: str, cfg: Any, workspace: AutonomousTaskWorkspace):
+    def _load_or_create_manager(self, path: Path, manager_class: type, task_desc: str, cfg: Any, workspace: AutonomousTaskWorkspace):
         if path.is_file():
             with path.open("rb") as handle:
                 state = pickle.load(handle)
@@ -1572,15 +1809,58 @@ for name, value in result['metrics'].items():
                         seen.add(node.id)
                         unique.append(node)
                 journal.nodes[:] = unique
+            # A validator or taxonomy upgrade may leave an otherwise resumable
+            # stage at its old iteration ceiling. Grant one bounded window per
+            # policy revision; never delete or relabel historical attempts.
+            _grant_policy_repair_window(manager)
+            if self.fixed_control_repair:
+                repair_stage = next(
+                    (stage for stage in reversed(manager.stages) if stage.name.startswith("3_")),
+                    None,
+                )
+                if repair_stage is None:
+                    raise AutonomousExperimentError(
+                        "Cannot repair fixed controls: proposed-method stage is absent"
+                    )
+                journal = manager.journals[repair_stage.name]
+                repaired = False
+                for node in journal.nodes:
+                    if (
+                        node.parent is not None
+                        and node.is_buggy is False
+                        and not node.is_seed_node
+                        and not node.is_seed_agg_node
+                    ):
+                        node.is_buggy = True
+                        node.is_buggy_plots = None
+                        node.exc_type = "ExperimentContractError"
+                        node._term_out = [
+                            "Generated experiment rejected after paired-control review: "
+                            + self.fixed_control_repair
+                            + ". Regenerate and rerun the proposed method using the exact "
+                            "trusted baseline fixed controls; do not edit saved metadata.\n"
+                        ]
+                        repaired = True
+                if not repaired:
+                    raise AutonomousExperimentError(
+                        "Cannot repair fixed controls: no completed proposed-method node"
+                    )
+                repair_stage.max_iterations = max(
+                    repair_stage.max_iterations, len(journal.nodes) + 3
+                )
+                manager.current_stage = repair_stage
             from ai_scientist.treesearch.utils.metric import MetricValue
 
             profile_path = workspace.dataset / "research_view/dataset_profile.json"
             recovery = []
             for journal in manager.journals.values():
                 for node in journal.nodes:
-                    if node.is_buggy is not True or node.exc_type is not None:
+                    if node.is_buggy is not True or node.exc_type not in (None, "ExperimentContractError"):
                         continue
-                    if getattr(node, "parse_exc_type", None) != "IntegrityError":
+                    artifact_review = "ARTIFACT_REVIEW_REQUIRED:" in str(
+                        getattr(node, "term_out", "")
+                    )
+                    if getattr(node, "parse_exc_type", None) != "IntegrityError" and not artifact_review:
                         continue
                     code_hash = hashlib.sha256(node.code.encode("utf-8")).hexdigest()
                     sources = [workspace.experiment_logs / "evidence" / code_hash]

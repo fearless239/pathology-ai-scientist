@@ -26,6 +26,7 @@ dist/
 
 # The dataset is intentionally outside Gate A and must not be committed.
 pathmnist_64.npz
+pneumoniamnist*.npz
 
 # The vendored upstream source is tracked; its generated files are not.
 vendor/AI-Scientist-v2/experiments/

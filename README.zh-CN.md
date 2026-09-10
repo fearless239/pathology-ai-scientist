@@ -157,7 +157,9 @@ $env:PATH_SCIENTIST_DEMO="1"; python -m streamlit run app.py
 ```bash
 path-ai-scientist init \
   --task-id TASK \
+  --dataset-adapter generic \
   --dataset-path pathmnist_64.npz \
+  --budget-limit-usd 10 \
   --direction "描述病理 AI 科研方向"
 
 path-ai-scientist run --task-id TASK
@@ -197,8 +199,8 @@ Pathology-AI-Scientist 将开放式的 AI 科学家循环，适配为具体病�
 
 ## 扩展新的数据集
 
-当前 Beta 版本提供了一个完整的参考适配器。新的病理数据集可以通过 `pathmnist.framework` 提供的
-Beta 接口进行集成：
+当前 Beta 版本提供通用 NPZ、图像目录和 CSV/JSON manifest 适配，并以 PathMNIST 作为完整病理
+参考案例。非标准来源可以通过 `pathmnist.framework` 提供的 Beta 接口编写可信自定义适配器：
 
 ```python
 from pathlib import Path
@@ -213,6 +215,9 @@ print(profile.content_sha256, profile.split_counts)
 - `ExperimentBackend`：预检、实验执行、候选方案冻结和密封测试评估。
 - `ArtifactValidator`：验证清单、可信指标、图表、引用和披露信息。
 - `ResearchTaskConfig`：与服务商无关的研究意图、适配器、预算、角色、权限和输出根目录。
+
+自定义适配器使用 `package.module:AdapterClass` 加载。接入方法、安全边界、合规检查和可复制模板见
+[数据集适配指南](docs/DATASET_ADAPTERS.md)。
 
 这些接口定义了预期的扩展边界，但在 1.0 版本之前不保证稳定。
 
@@ -248,11 +253,15 @@ path-ai-scientist-demo --output .demo/second
 
 ### 支持哪些数据集？
 
-PathMNIST 是当前 Beta 版本的首个完整参考适配器。框架接口计划逐步支持更多病理数据集。
+内置 `generic` 适配器支持 NPZ、图像目录及 CSV/JSON manifest；可信自定义适配器可通过
+`package.module:AdapterClass` 加载。PathMNIST 仍是当前 Beta 的首个完整病理参考案例。
 
 ## 文档
 
 - [系统架构](docs/ARCHITECTURE.md)
+- [数据集适配指南](docs/DATASET_ADAPTERS.md)
+- [PneumoniaMNIST 前端端到端运行手册](docs/PNEUMONIAMNIST_RUNBOOK.zh-CN.md)
+- [PneumoniaMNIST 端到端案例与英文论文](docs/case-studies/pneumoniatest-001/README.md)
 - [论文发布后端](docs/UPSTREAM_PUBLICATION.md)
 - [源码来源](docs/SOURCE_PROVENANCE.md)
 - [发布检查清单](docs/RELEASE_CHECKLIST.md)

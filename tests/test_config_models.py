@@ -67,11 +67,12 @@ def test_invalid_unrelated_catalog_entry_does_not_block_candidates():
     assert "openrouter/auto-beta" not in registry.models
 
 
-def test_config_rejects_more_than_eight_dollars(tmp_path, project_root):
+@pytest.mark.parametrize("limit", ["50.01", "0", "-1", ".nan", ".inf"])
+def test_config_rejects_invalid_or_unapproved_budget(tmp_path, project_root, limit):
     text = (project_root / "configs" / "gate_a.yaml").read_text(encoding="utf-8")
     path = tmp_path / "bad.yaml"
     path.write_text(
-        text.replace("hard_limit_usd: 8.0", "hard_limit_usd: 8.01"), encoding="utf-8"
+        text.replace("hard_limit_usd: 8.0", f"hard_limit_usd: {limit}"), encoding="utf-8"
     )
     with pytest.raises(ConfigError):
         load_config(path)

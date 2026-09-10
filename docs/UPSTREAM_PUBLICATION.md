@@ -70,3 +70,13 @@ No paid model requests, training, or held-out evaluation were performed for this
 
 The corresponding baseline and patched hashes are in
 `UPSTREAM_PUBLICATION_PATCHES.json`; no upstream version upgrade was performed.
+
+## Local writing-input and recovery improvement
+
+The adapter now supplies a deterministic research brief in the native idea slot,
+with the complete evidence retained in experiment summaries. Existing native review
+and reflection calls also check the scientific argument and workflow jargon; no
+additional model calls or upstream changes are introduced. Committed publication
+artifacts are verified before response caches may restore projections on resume.
+Changed adapter inputs still require version review; historical tasks are not migrated.
+See [the diagnosis, trust boundaries and user validation procedure](QUALITY_TRUST_REVIEW.md).

@@ -1,5 +1,5 @@
 schema_version: 1
-display_name: Path-AI Scientist Gate A (Zhipu)
+display_name: Path-AI Scientist GLM-5.2 stable configuration
 
 # Generic OpenAI-compatible gateway, currently pointed at the Paratera LLM API
 # (llmapi.paratera.com). The key must stay in the process environment as
@@ -11,21 +11,22 @@ provider:
   name: openai_compatible
   base_url: https://llmapi.paratera.com/v1
   api_key_env: PARATERA_API_KEY
-  timeout_seconds: 120
+  # Long experiment-code and manuscript generations may exceed two minutes.
+  # This is a wait ceiling only; uncertain transport outcomes are still never retried.
+  timeout_seconds: 600
   max_retries: 5
 
 budget:
-  hard_limit_usd: 8.0
+  hard_limit_usd: 50.0
   reserve_margin: 1.15
   # Zhipu publishes prices in CNY while the Gate A ledger is USD-capped. This pinned
   # rate is an engineering approximation recorded with each run, not a market feed.
   cny_per_usd: 7.1
 
-# The gateway exposes no priced machine-readable catalog, so prices are pinned here
-# from public 2026-06/2026-08 GLM list-price reports. Depending on your plan this may
-# be subscription-billed, so the USD ledger is an accounting proxy that keeps the
-# reservation discipline and hard cap, not necessarily a per-token charge.
-# VERIFY the model IDs below against the /v1/models response for your account.
+# ESTIMATED ACCOUNTING ONLY, NOT provider prices or actual billed cost.
+# The $50 cap does not guarantee a $50 actual bill. Replace rates when verified.
+# GLM-5.2 is the primary model; GLM-5.1 remains the independent reviewer so the
+# writer and reviewer are not the same model.
 models:
   GLM-5.2:
     context_length: 1048576
@@ -45,9 +46,6 @@ roles:
   experiment_code:
     candidates: [GLM-5.2, GLM-5.1]
     max_input_tokens: 10000
-    # Complete autonomous programs may include data loading, training, controls,
-    # evidence output, and debugging notes. Keep enough room for code without
-    # truncating a valid program at the provider boundary.
     max_output_tokens: 12000
     required_parameters: []
   plotting:
@@ -58,16 +56,11 @@ roles:
   paper_writer:
     candidates: [GLM-5.2, GLM-5.1]
     max_input_tokens: 12000
-    # Full papers, evidence-bounded revisions, and bilingual translations need
-    # enough room for complete sections without truncating conclusions or refs.
     max_output_tokens: 7000
     required_parameters: []
   reviewer:
     candidates: [GLM-5.1, GLM-5.2]
     max_input_tokens: 12000
-    # GLM-5.1 may account hidden reasoning against this ceiling even when the
-    # compatible gateway receives thinking.type=disabled. Leave enough room for
-    # reasoning plus the explicitly concise review.
     max_output_tokens: 7000
     required_parameters: []
 

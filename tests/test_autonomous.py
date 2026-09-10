@@ -62,6 +62,51 @@ def test_gateway_adapter_routes_structured_calls_through_provider_ledger():
     assert calls[0][0] == "ideation"
 
 
+def test_gateway_adapter_routes_tuning_idea_to_ideation_model():
+    calls = []
+
+    class Provider:
+        config = SimpleNamespace(roles={
+            "ideation": SimpleNamespace(max_output_tokens=8000),
+            "experiment_code": SimpleNamespace(max_output_tokens=12000),
+        })
+
+        def call_text(self, role, request_id, system, prompt):
+            calls.append((role, request_id, system, prompt))
+            return "HYPERPARAM NAME: learning rate\nDESCRIPTION: Compare two values.", {}
+
+    adapter = GatewayQueryAdapter(Provider(), "task")
+    result = adapter(system_message={
+        "Instructions": "Propose one tuning idea",
+        "Response format": "HYPERPARAM NAME: <name>\nDESCRIPTION: <description>",
+    })
+
+    assert result.startswith("HYPERPARAM NAME:")
+    assert calls[0][0] == "ideation"
+    assert "-out8000-" in calls[0][1]
+
+
+def test_gateway_adapter_keeps_program_generation_on_code_model():
+    calls = []
+
+    class Provider:
+        config = SimpleNamespace(roles={
+            "ideation": SimpleNamespace(max_output_tokens=8000),
+            "experiment_code": SimpleNamespace(max_output_tokens=12000),
+        })
+
+        def call_text(self, role, request_id, system, prompt):
+            calls.append((role, request_id))
+            return "```python\nprint('ok')\n```", {}
+
+    GatewayQueryAdapter(Provider(), "task")(
+        system_message="Return a plan followed by a complete Python program."
+    )
+
+    assert calls[0][0] == "experiment_code"
+    assert "-out12000-" in calls[0][1]
+
+
 def test_gateway_adapter_continues_call_sequence_from_ledger(tmp_path):
     ledger_path = tmp_path / "budget.json"
     ledger_path.write_text(json.dumps({

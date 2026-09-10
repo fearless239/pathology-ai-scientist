@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import importlib
 import json
 import random
 import shutil
@@ -16,6 +17,10 @@ import numpy as np
 
 class DatasetDiscoveryError(RuntimeError):
     """Raised when labels, samples, or split isolation cannot be established safely."""
+
+
+class DatasetAdapterLoadError(DatasetDiscoveryError):
+    """Raised when a trusted dataset adapter cannot be imported or instantiated."""
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -51,7 +56,9 @@ class DatasetSpec:
     inference: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     confidence: float = 1.0
-    recommended_metrics: list[str] = field(default_factory=lambda: ["macro_f1", "accuracy"])
+    recommended_metrics: list[str] = field(
+        default_factory=lambda: ["macro_f1", "accuracy", "weighted_f1"]
+    )
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -62,6 +69,35 @@ class DatasetSpec:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return path
+
+
+def load_dataset_spec(path: Path) -> DatasetSpec:
+    """Load a persisted dataset profile through one shared project API."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    required = (
+        "schema_version",
+        "name",
+        "source_type",
+        "source_path",
+        "content_sha256",
+        "image_shape",
+        "channels",
+        "classes",
+        "label_mapping",
+        "split_counts",
+        "class_counts",
+    )
+    return DatasetSpec(
+        **{key: raw[key] for key in required},
+        samples=[SampleRecord(**sample) for sample in raw["samples"]],
+        has_group_ids=raw.get("has_group_ids", False),
+        inference=raw.get("inference", []),
+        warnings=raw.get("warnings", []),
+        confidence=float(raw.get("confidence", 1.0)),
+        recommended_metrics=raw.get(
+            "recommended_metrics", ["macro_f1", "accuracy", "weighted_f1"]
+        ),
+    )
 
 
 class DatasetAdapter:
@@ -272,6 +308,195 @@ class DatasetAdapter:
         return digest.hexdigest()
 
 
+GENERIC_ADAPTER_ID = "generic"
+LEGACY_GENERIC_ADAPTER_ID = "pathmnist.dataset_adapter:DatasetAdapter"
+
+
+def normalize_dataset_adapter_identifier(identifier: str | None) -> str:
+    """Return the stable identifier persisted in new task records."""
+    value = (identifier or GENERIC_ADAPTER_ID).strip()
+    if value in {
+        GENERIC_ADAPTER_ID,
+        "pathmnist.dataset_adapter.DatasetAdapter",
+        LEGACY_GENERIC_ADAPTER_ID,
+    }:
+        return GENERIC_ADAPTER_ID
+    return value
+
+
+def load_dataset_adapter(identifier: str | None = None, seed: int = 7) -> Any:
+    """Load a trusted dataset adapter by built-in name or ``module:Class`` reference.
+
+    Third-party adapters execute in the host process and are therefore trusted
+    extensions. LLM-generated experiment code must never be loaded through this API.
+    """
+    normalized = normalize_dataset_adapter_identifier(identifier)
+    if normalized == GENERIC_ADAPTER_ID:
+        return DatasetAdapter(seed=seed)
+    if normalized.count(":") != 1:
+        raise DatasetAdapterLoadError(
+            "Dataset adapter must be 'generic' or a trusted 'package.module:AdapterClass'"
+        )
+    module_name, class_name = normalized.split(":", 1)
+    if not module_name or not class_name or not class_name.isidentifier():
+        raise DatasetAdapterLoadError(
+            "Dataset adapter must be 'generic' or a trusted 'package.module:AdapterClass'"
+        )
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        raise DatasetAdapterLoadError(
+            f"Cannot import dataset adapter module {module_name!r}: {exc}"
+        ) from exc
+    adapter_class = getattr(module, class_name, None)
+    if not isinstance(adapter_class, type):
+        raise DatasetAdapterLoadError(
+            f"Dataset adapter class {class_name!r} was not found in {module_name!r}"
+        )
+    try:
+        adapter = adapter_class(seed=seed)
+    except Exception as exc:
+        raise DatasetAdapterLoadError(
+            f"Cannot construct dataset adapter {normalized!r} with seed={seed}: {exc}"
+        ) from exc
+    from .framework import DatasetAdapter as DatasetAdapterProtocol
+
+    if not isinstance(adapter, DatasetAdapterProtocol):
+        raise DatasetAdapterLoadError(
+            f"Dataset adapter {normalized!r} does not implement discover(source, profile_path)"
+        )
+    return adapter
+
+
+def _sample_content_fingerprints(spec: DatasetSpec) -> dict[str, str]:
+    """Hash sample payloads so conformance catches cross-split copies."""
+    fingerprints: dict[str, str] = {}
+    if spec.source_type == "npz":
+        by_source: dict[str, list[SampleRecord]] = defaultdict(list)
+        for sample in spec.samples:
+            by_source[sample.path].append(sample)
+        for source_path, samples in by_source.items():
+            with np.load(source_path, allow_pickle=False) as source:
+                for sample in samples:
+                    if sample.array_key is None or sample.index is None:
+                        raise DatasetDiscoveryError(
+                            "NPZ samples must define array_key and index"
+                        )
+                    value = np.asarray(source[sample.array_key][sample.index])
+                    digest = hashlib.sha256()
+                    digest.update(str(value.dtype).encode("ascii"))
+                    digest.update(json.dumps(list(value.shape)).encode("ascii"))
+                    digest.update(value.tobytes(order="C"))
+                    fingerprints[sample.id] = digest.hexdigest()
+        return fingerprints
+
+    for sample in spec.samples:
+        path = Path(sample.path)
+        if not path.is_file():
+            raise DatasetDiscoveryError(
+                f"Adapter sample path does not exist for content verification: {path}"
+            )
+        fingerprints[sample.id] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return fingerprints
+
+
+def validate_dataset_adapter(
+    adapter: Any, source: Path, scratch_root: Path
+) -> dict[str, Any]:
+    """Run the public conformance checks required by the research workflow.
+
+    ``scratch_root`` is disposable output owned by the caller. The check creates
+    physically separate research and sealed-test views but never modifies the source.
+    """
+    from .framework import DatasetAdapter as DatasetAdapterProtocol
+
+    if not isinstance(adapter, DatasetAdapterProtocol):
+        raise DatasetAdapterLoadError("Dataset adapter does not implement discover")
+    scratch_root = scratch_root.resolve()
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    first = adapter.discover(source.resolve(), scratch_root / "dataset_profile.json")
+    second = adapter.discover(source.resolve())
+    if not isinstance(first, DatasetSpec) or not isinstance(second, DatasetSpec):
+        raise DatasetAdapterLoadError("Dataset adapter discover() must return DatasetSpec")
+    if len(first.classes) < 2 or set(first.label_mapping) != set(first.classes):
+        raise DatasetDiscoveryError("Adapter must define at least two mapped classes")
+    if first.channels < 1 or not first.image_shape:
+        raise DatasetDiscoveryError("Adapter must define a valid image shape and channel count")
+    actual_split_counts = Counter(sample.split for sample in first.samples)
+    if any(sample.split not in SPLITS for sample in first.samples):
+        raise DatasetDiscoveryError("Adapter returned a sample with an unsupported split")
+    if any(actual_split_counts[split] < 1 for split in SPLITS):
+        raise DatasetDiscoveryError("Adapter must return non-empty train, validation, and test splits")
+    if dict(actual_split_counts) != first.split_counts:
+        raise DatasetDiscoveryError("Dataset split counts do not match returned samples")
+    if any(sample.label not in first.label_mapping for sample in first.samples):
+        raise DatasetDiscoveryError("Adapter returned a sample with an unmapped label")
+    if first.content_sha256 != second.content_sha256:
+        raise DatasetDiscoveryError("Dataset fingerprint is not deterministic")
+    if (
+        first.label_mapping != second.label_mapping
+        or first.split_counts != second.split_counts
+        or [sample.id for sample in first.samples] != [sample.id for sample in second.samples]
+    ):
+        raise DatasetDiscoveryError("Dataset labels or splits are not deterministic")
+
+    sample_ids: set[str] = set()
+    identities: dict[str, str] = {}
+    groups: dict[str, str] = {}
+    for sample in first.samples:
+        if sample.id in sample_ids:
+            raise DatasetDiscoveryError(f"Duplicate sample id: {sample.id}")
+        sample_ids.add(sample.id)
+        identity = f"{sample.path}:{sample.array_key}:{sample.index}"
+        previous_split = identities.setdefault(identity, sample.split)
+        if previous_split != sample.split:
+            raise DatasetDiscoveryError("The same sample occurs in multiple splits")
+        if sample.group_id:
+            previous_group_split = groups.setdefault(sample.group_id, sample.split)
+            if previous_group_split != sample.split:
+                raise DatasetDiscoveryError("A patient/group occurs in multiple splits")
+
+    content_splits: dict[str, str] = {}
+    content_fingerprints = _sample_content_fingerprints(first)
+    for sample in first.samples:
+        fingerprint = content_fingerprints[sample.id]
+        previous_content_split = content_splits.setdefault(fingerprint, sample.split)
+        if previous_content_split != sample.split:
+            raise DatasetDiscoveryError(
+                "Identical sample content occurs in multiple splits"
+            )
+
+    research_view = materialize_split_view(
+        first, scratch_root / "research_view", {"train", "validation"}
+    )
+    test_view = materialize_split_view(first, scratch_root / "sealed_test_view", {"test"})
+    research_ids = {
+        sample.id for sample in first.samples if sample.split in {"train", "validation"}
+    }
+    test_ids = {sample.id for sample in first.samples if sample.split == "test"}
+    if research_ids & test_ids:
+        raise DatasetDiscoveryError("Research and sealed-test sample IDs overlap")
+    research_view_interface(first, research_view)
+    return {
+        "passed": True,
+        "schema_version": 1,
+        "dataset_name": first.name,
+        "source_type": first.source_type,
+        "content_sha256": first.content_sha256,
+        "image_shape": first.image_shape,
+        "channels": first.channels,
+        "classes": first.classes,
+        "label_mapping": first.label_mapping,
+        "split_counts": first.split_counts,
+        "has_group_ids": first.has_group_ids,
+        "recommended_metrics": first.recommended_metrics,
+        "research_view": str(research_view),
+        "sealed_test_view": str(test_view),
+        "research_test_overlap": False,
+        "cross_split_duplicate_content": False,
+    }
+
+
 def safely_extract_zip(archive: Path, destination: Path) -> Path:
     destination = destination.resolve()
     destination.mkdir(parents=True, exist_ok=True)
@@ -384,3 +609,33 @@ def materialize_split_view(spec: DatasetSpec, destination: Path, allowed_splits:
         encoding="utf-8",
     )
     return destination
+
+
+def normalize_inference_view_layout(spec: DatasetSpec, view: Path) -> Path:
+    """Make channel-less grayscale NPZ batches safe for frozen inference.
+
+    MedMNIST-style grayscale arrays are stored as ``N,H,W``. Generated programs
+    commonly add the channel axis while a training split is present, then reuse
+    the same dataset class in an inference-only view where that conditional is
+    false. Normalize only derived, inference-only views to ``N,1,H,W`` so the
+    frozen model receives the same tensor layout it saw during training. Color
+    arrays and already channelized grayscale arrays are left byte-for-byte alone.
+    """
+    view = view.resolve()
+    dataset_path = view / "dataset.npz"
+    if spec.source_type != "npz" or spec.channels != 1 or not dataset_path.is_file():
+        return view
+    with np.load(dataset_path, allow_pickle=False) as mounted:
+        arrays = {key: mounted[key] for key in mounted.files}
+    image_keys = [key for key in arrays if key.endswith("_images")]
+    changed = False
+    for key in image_keys:
+        images = arrays[key]
+        if images.ndim == 3:
+            arrays[key] = images[:, np.newaxis, :, :]
+            changed = True
+    if changed:
+        temporary = view / "dataset.layout.tmp.npz"
+        np.savez_compressed(temporary, **arrays)
+        temporary.replace(dataset_path)
+    return view

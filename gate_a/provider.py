@@ -11,9 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from jsonschema import Draft202012Validator
+
 from .budget import BudgetLedger
 from .config import AppConfig
 from .models import ModelInfo
+from .request_diagnostics import RequestDiagnostic
 
 
 class ProviderError(RuntimeError):
@@ -21,7 +24,10 @@ class ProviderError(RuntimeError):
 
 
 class ProviderOutcomeUnknown(ProviderError):
-    """A request may have been billed; never retry or release its reservation."""
+    """A request may have been billed; retain it and recover at most once later."""
+
+
+MAX_OUTCOME_UNKNOWN_RECOVERIES = 1
 
 
 def _await_cached_response(
@@ -95,6 +101,58 @@ def _empty_text_retry_prompt(prompt: str) -> str:
     )
 
 
+def _diagnostic_state(response_dir: Path, request_id: str) -> str | None:
+    path = response_dir / "diagnostics" / f"{request_id}.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return str(value.get("state")) if isinstance(value, dict) else None
+
+
+def _recovery_request_id(
+    request_id: str,
+    response_dir: Path,
+    ledger: BudgetLedger,
+    *,
+    max_recoveries: int = MAX_OUTCOME_UNKNOWN_RECOVERIES,
+) -> str:
+    """Choose a bounded new ID only after a durable unknown-outcome diagnosis.
+
+    This function is called at the start of a new user-authorized run. It never
+    retries inside the failing provider call. Every uncertain request keeps its
+    full reservation, and the new ID receives a separate reservation.
+    """
+    base = _safe_request_id(request_id)
+    for recovery in range(max_recoveries + 1):
+        candidate = base if recovery == 0 else _safe_request_id(
+            f"{base}-outcome-recovery-{recovery}"
+        )
+        if (response_dir / f"{candidate}.json").exists():
+            return candidate
+        record = ledger.request_record(candidate)
+        if record is None or record.get("state") == "released":
+            return candidate
+        if record.get("state") == "settled":
+            raise ProviderOutcomeUnknown(
+                f"Request {candidate} is settled but its cached response is missing; "
+                "manual reconciliation required"
+            )
+        if record.get("state") in {"reserved", "outcome_unknown"}:
+            if _diagnostic_state(response_dir, candidate) == "outcome_unknown":
+                ledger.mark_outcome_unknown(
+                    candidate, "provider diagnostic recorded outcome_unknown"
+                )
+                continue
+            # A reservation without a terminal diagnostic may belong to a live
+            # identical worker. Let _call perform its cache wait and fail closed.
+            return candidate
+    raise ProviderOutcomeUnknown(
+        f"Request {base} exhausted {max_recoveries} budget-preserving recovery attempt(s); "
+        "manual provider reconciliation required"
+    )
+
+
 def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -111,6 +169,16 @@ def _usage_dict(raw: dict[str, Any]) -> dict[str, Any]:
         "cost": usage.get("cost"),
         "cost_details": usage.get("cost_details") or {},
     }
+
+
+def _apply_reasoning_parameters(body: dict[str, Any], model_id: str) -> None:
+    """Apply the model-specific Paratera reasoning compatibility rule."""
+    if model_id.casefold() in {"glm-5.3", "glm-5.3-flash"}:
+        body["reasoning_effort"] = "low"
+        body.pop("thinking", None)
+    elif model_id.casefold() in {"glm-5.2", "glm-5.1"}:
+        body["thinking"] = {"type": "disabled"}
+        body.pop("reasoning_effort", None)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -401,6 +469,7 @@ class ZhipuProvider:
     ) -> tuple[str, dict[str, Any]]:
         for attempt in range(3):
             active_id = request_id if attempt == 0 else f"{request_id}-text-v2-retry-{attempt}"
+            active_id = _recovery_request_id(active_id, self.response_dir, self.ledger)
             active_prompt = prompt if attempt == 0 else _empty_text_retry_prompt(prompt)
             result = self._call(role, active_id, system, active_prompt, None, None)
             if isinstance(result.value, str) and result.value.strip():
@@ -417,14 +486,19 @@ class ZhipuProvider:
         function_name: str,
         schema: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        validator = Draft202012Validator(schema)
         last_error: ProviderError | None = None
         for attempt in range(3):
             active_id = request_id if attempt == 0 else f"{request_id}-json-v2-retry-{attempt}"
+            active_id = _recovery_request_id(active_id, self.response_dir, self.ledger)
             active_prompt = prompt
             if attempt:
                 active_prompt += (
                     "\n\nPrevious structured output was empty or invalid. Return the requested "
-                    "function arguments as one complete JSON object only."
+                    "function arguments as one complete JSON object only. Include every required "
+                    "field, including empty arrays when appropriate. Do not invent scientific values."
+                    "\nValidation failure: " + str(last_error)
+                    + "\nRequired schema: " + json.dumps(schema, ensure_ascii=False)
                 )
             try:
                 result = self._call(role, active_id, system, active_prompt, function_name, schema)
@@ -433,9 +507,17 @@ class ZhipuProvider:
             except ProviderError as error:
                 last_error = error
                 continue
-            if isinstance(result.value, dict):
+            errors = list(validator.iter_errors(result.value))
+            if isinstance(result.value, dict) and not errors:
                 return result.value, {**result.metadata, "json_retry_attempt": attempt}
-            last_error = ProviderError(f"Request {active_id} did not return a JSON object")
+            details = "; ".join(
+                f"/{'/'.join(map(str, error.absolute_path))}: {error.message[:400]}"
+                for error in errors[:8]
+            ) or "Expected a JSON object"
+            last_error = ProviderError(
+                f"Request {active_id} failed structured-output validation: {details}. "
+                "The original response and usage are retained; no fields were synthesized."
+            )
         raise last_error or ProviderError(f"Request {request_id} did not return a JSON object")
 
     def _call(
@@ -487,8 +569,19 @@ class ZhipuProvider:
         # GLM-5.x defaults to deep thinking and may spend the whole completion
         # budget without emitting content or a tool call. These workflow calls
         # need direct, machine-readable output.
-        body["thinking"] = {"type": "disabled"}
+        # Paratera rejects disabled thinking for both configured GLM-5.3 variants.
+        _apply_reasoning_parameters(body, model.model_id)
         structured_method = "plain_text"
+        diagnostic = RequestDiagnostic(
+            path=self.response_dir / "diagnostics" / f"{request_id}.json",
+            request_id=request_id,
+            role=role,
+            model=model.model_id,
+            endpoint=self.config.provider.base_url + "/chat/completions",
+            timeout_seconds=self.config.provider.timeout_seconds,
+            max_output_tokens=role_config.max_output_tokens,
+            input_characters=len(system) + len(prompt),
+        )
         if function_name and schema:
             # Zhipu documents tools with tool_choice="auto"; a named forced tool_choice is
             # not part of the documented surface, so parse tool calls with a content-JSON
@@ -508,8 +601,9 @@ class ZhipuProvider:
 
         try:
             try:
-                raw = self._post_json("/chat/completions", body)
-            except ProviderOutcomeUnknown:
+                raw = self._post_json("/chat/completions", body, diagnostic, "initial")
+            except ProviderOutcomeUnknown as exc:
+                self.ledger.mark_outcome_unknown(request_id, str(exc))
                 raise
             except ProviderError as exc:
                 # Subscription coding endpoints may reject tool parameters even though
@@ -518,7 +612,7 @@ class ZhipuProvider:
                 if function_name and "tools" in body and "status 400" in str(exc):
                     body.pop("tools", None)
                     body.pop("tool_choice", None)
-                    raw = self._post_json("/chat/completions", body)
+                    raw = self._post_json("/chat/completions", body, diagnostic, "without_tools")
                 else:
                     raise
             if raw.get("error"):
@@ -555,7 +649,7 @@ class ZhipuProvider:
                             for key, item in body.items()
                             if key not in {"tools", "tool_choice"}
                         }
-                        repair_body["thinking"] = {"type": "disabled"}
+                        _apply_reasoning_parameters(repair_body, model.model_id)
                         repair_body["messages"] = [
                             {"role": "system", "content": system},
                             {
@@ -567,7 +661,7 @@ class ZhipuProvider:
                                 ),
                             },
                         ]
-                        raw = self._post_json("/chat/completions", repair_body)
+                        raw = self._post_json("/chat/completions", repair_body, diagnostic, "json_repair")
                         if raw.get("error"):
                             raise ProviderError(
                                 f"Zhipu returned an in-band generation error for {request_id}"
@@ -596,6 +690,7 @@ class ZhipuProvider:
                 value = choice.get("content") or ""
 
             usage = _usage_dict(raw)
+            diagnostic.complete(raw, usage)
             actual_cost = self._actual_cost(model, usage)
             metadata = {
                 "request_id": raw.get("id"),
@@ -610,6 +705,10 @@ class ZhipuProvider:
             self.ledger.settle(request_id, actual_cost, usage)
             return ProviderResult(value, metadata)
         except Exception as exc:
+            if isinstance(exc, ProviderOutcomeUnknown):
+                self.ledger.mark_outcome_unknown(request_id, str(exc))
+            if not isinstance(exc, ProviderOutcomeUnknown):
+                diagnostic.fail_after_response(exc)
             if 'actual_cost' in locals() and 'usage' in locals():
                 # The provider answered: never turn a persistence error into a paid retry.
                 self.ledger.recover_cached(request_id, {'actual_cost_usd': actual_cost, 'usage': usage})
@@ -630,11 +729,18 @@ class ZhipuProvider:
             + model.request_price
         )
 
-    def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _post_json(
+        self, path: str, body: dict[str, Any],
+        diagnostic: RequestDiagnostic | None = None, attempt_name: str = "request",
+    ) -> dict[str, Any]:
         url = self.config.provider.base_url + path
         data = json.dumps(body).encode("utf-8")
         last_error: Exception | None = None
+        last_http_detail = ""
+        retried_generic_parameter_error = False
         for attempt in range(self.config.provider.max_retries + 1):
+            if diagnostic is not None:
+                diagnostic.begin_attempt(attempt_name if attempt == 0 else f"{attempt_name}_retry_{attempt}")
             request = urllib.request.Request(
                 url,
                 data=data,
@@ -648,15 +754,55 @@ class ZhipuProvider:
                 with urllib.request.urlopen(
                     request, timeout=self.config.provider.timeout_seconds
                 ) as response:
-                    return json.loads(response.read().decode("utf-8"))
+                    payload = response.read()
+                    if diagnostic is not None:
+                        diagnostic.transport_succeeded(
+                            int(getattr(response, "status", 200)), response.headers, len(payload)
+                        )
+                    return json.loads(payload.decode("utf-8"))
             except urllib.error.HTTPError as exc:
+                if diagnostic is not None:
+                    diagnostic.transport_failed(exc, http_status=exc.code, headers=exc.headers)
                 last_error = exc
+                try:
+                    payload = json.loads(exc.read().decode("utf-8"))
+                    last_http_detail = str(payload.get("error", {}).get("message") or "")[:500]
+                except Exception:
+                    last_http_detail = ""
                 if exc.code == 408 or exc.code >= 500:
-                    raise ProviderOutcomeUnknown(f"HTTP {exc.code}: billing outcome unknown; reconciliation required") from exc
+                    suffix = f"; diagnostics: {diagnostic.path}" if diagnostic else ""
+                    raise ProviderOutcomeUnknown(
+                        f"HTTP {exc.code}: billing outcome unknown; current run stopped. "
+                        f"Start the task again for one budget-reserved recovery{suffix}"
+                    ) from exc
+                generic_parameter_error = (
+                    exc.code == 400
+                    and "a parameter specified in the request is not valid"
+                    in last_http_detail.casefold()
+                )
+                if generic_parameter_error and not retried_generic_parameter_error:
+                    retried_generic_parameter_error = True
+                    # Some OpenAI-compatible subscription routes expose a smaller
+                    # effective input-plus-output window than their model catalog.
+                    # A long prompt combined with the configured completion ceiling
+                    # is then reported only as a generic invalid-parameter error.
+                    # Retry this known pre-generation rejection once with a smaller
+                    # completion allowance; do not retry timeouts or specific 400s.
+                    requested = int(body.get("max_tokens") or 0)
+                    if requested > 1024:
+                        body["max_tokens"] = max(1024, requested // 2)
+                        data = json.dumps(body).encode("utf-8")
+                    continue
                 if exc.code != 429:
                     break
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-                raise ProviderOutcomeUnknown("Transport/response failure: billing outcome unknown; reconciliation required") from exc
+                if diagnostic is not None:
+                    diagnostic.transport_failed(exc)
+                suffix = f"; diagnostics: {diagnostic.path}" if diagnostic else ""
+                raise ProviderOutcomeUnknown(
+                    "Transport/response failure: billing outcome unknown; current run stopped. "
+                    f"Start the task again for one budget-reserved recovery{suffix}"
+                ) from exc
             if attempt < self.config.provider.max_retries:
                 retry_after = getattr(last_error, "headers", {}).get("Retry-After")
                 try:
@@ -667,13 +813,7 @@ class ZhipuProvider:
         status = getattr(last_error, "code", "network")
         detail = ""
         if isinstance(last_error, urllib.error.HTTPError):
-            try:
-                payload = json.loads(last_error.read().decode("utf-8"))
-                message = payload.get("error", {}).get("message")
-                if message:
-                    detail = f": {str(message)[:300]}"
-            except Exception:
-                detail = ""
+            detail = f": {last_http_detail[:300]}" if last_http_detail else ""
         elif last_error is not None:
             detail = f": {str(last_error)[:300]}"
         raise ProviderError(f"Zhipu HTTP request failed with status {status}{detail}")

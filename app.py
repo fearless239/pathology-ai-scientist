@@ -788,6 +788,31 @@ def render_research_workflow(project_root: Path) -> None:
         st.rerun()
 
 
+def _initialize_research_task(
+    project_root: Path,
+    *,
+    task_id: str,
+    direction: str,
+    dataset_path: str,
+    dataset_adapter: str = "generic",
+    seed: int = 7,
+    budget_limit_usd: float = 10.0,
+):
+    """Keep UI values explicit at the task-creation boundary."""
+    return _autonomous_init(
+        argparse.Namespace(
+            state_root=workflow_root(project_root),
+            task_id=task_id,
+            dataset_adapter=dataset_adapter,
+            dataset_path=Path(dataset_path),
+            direction=direction,
+            seed=seed,
+            budget_limit_usd=budget_limit_usd,
+            resume=False,
+        )
+    )
+
+
 def render_research_task_creator(project_root: Path) -> None:
     st.markdown(
         """
@@ -814,7 +839,7 @@ def render_research_task_creator(project_root: Path) -> None:
                     width="stretch",
                 )
     st.markdown("### 描述你的课题")
-    st.caption("所有新课题使用完整研究模式：API 硬上限 $8，接近 AI-Scientist-v2 原始搜索额度，并由研究合同决定是否完成。")
+    st.caption("新课题默认本地估算预算上限 $10。暂按输入 ¥10/百万 token、输出 ¥40/百万 token 核算，并非平台报价或真实扣费上限。研究合同决定是否完成；旧任务保留原预算。")
     with st.form("create-research-task"):
         direction = st.text_area(
             "研究方向",
@@ -826,9 +851,21 @@ def render_research_task_creator(project_root: Path) -> None:
             "课题 ID", placeholder="pathology-study-001", key="research-task-id"
         )
         with st.expander("数据与复现设置"):
+            adapter_mode = st.selectbox(
+                "数据适配器",
+                options=("generic", "自定义可信适配器"),
+                help="generic 支持 NPZ、ImageFolder 和 CSV/JSON manifest。自定义适配器在宿主进程运行，仅加载可信代码。",
+            )
+            custom_adapter = ""
+            if adapter_mode == "自定义可信适配器":
+                custom_adapter = st.text_input(
+                    "自定义适配器",
+                    placeholder="package.module:AdapterClass",
+                )
             dataset = st.text_input(
                 "数据集路径",
-                value=str(project_root / "pathmnist_64.npz"),
+                value="",
+                placeholder="例如：/datasets/pneumoniamnist.npz",
                 help="支持 NPZ、ImageFolder 或带 split/group 字段的 manifest 数据集。",
             )
             seed = st.number_input(
@@ -837,17 +874,34 @@ def render_research_task_creator(project_root: Path) -> None:
                 value=7,
                 help="仅当数据没有完整 train/validation/test 时用于可复现拆分；若数据已有官方 split（例如 PathMNIST NPZ），此值会被忽略。",
             )
+            budget_limit_usd = st.number_input(
+                "LLM 预算上限（美元）",
+                min_value=0.1,
+                value=10.0,
+                step=0.5,
+            )
         submitted = st.form_submit_button("创建课题", type="primary", width="stretch")
     if submitted:
-        if not task_id.strip() or not direction.strip():
-            st.error("任务 ID 和研究方向不能为空。")
+        if not task_id.strip() or not direction.strip() or not dataset.strip():
+            st.error("任务 ID、研究方向和数据集路径不能为空。")
+            return
+        dataset_adapter = (
+            custom_adapter.strip()
+            if adapter_mode == "自定义可信适配器"
+            else "generic"
+        )
+        if adapter_mode == "自定义可信适配器" and not dataset_adapter:
+            st.error("请输入 package.module:AdapterClass 格式的可信适配器。")
             return
         try:
-            result = _autonomous_init(
-                argparse.Namespace(
-                    state_root=workflow_root(project_root), task_id=task_id.strip(),
-                    dataset_path=Path(dataset), direction=direction.strip(), seed=int(seed), resume=False,
-                )
+            result = _initialize_research_task(
+                project_root,
+                task_id=task_id.strip(),
+                dataset_adapter=dataset_adapter,
+                dataset_path=dataset,
+                direction=direction.strip(),
+                seed=int(seed),
+                budget_limit_usd=float(budget_limit_usd),
             )
             st.session_state["selected_research_task"] = result["task_id"]
             st.session_state["active_view"] = "workspace"

@@ -26,9 +26,20 @@ def _generate_contract(
     profile: dict,
     revision_feedback: str,
 ) -> dict:
+    def bind_budget(contract):
+        from gate_a.config import DEFAULT_RESEARCH_BUDGET_USD
+
+        limit = float(task.get("budget_limit_usd", 8.0))
+        if not 0 < limit <= DEFAULT_RESEARCH_BUDGET_USD:
+            raise ValueError("Task budget must be positive and at most 50.0")
+        contract["resource_plan"]["api_hard_limit_usd"] = limit
+        contract.pop("contract_sha256", None)
+        contract["contract_sha256"] = contract_sha256(contract)
+        return contract
+
     split_seed = int(task.get("seed", 7))
     if project_root is None or not os.getenv("PARATERA_API_KEY", "").strip():
-        return generate_contract(direction, profile, split_seed=split_seed, revision_feedback=revision_feedback)
+        return bind_budget(generate_contract(direction, profile, split_seed=split_seed, revision_feedback=revision_feedback))
     from gate_a.budget import BudgetLedger
     from gate_a.config import load_config
     from gate_a.pipeline import select_live_models
@@ -38,25 +49,29 @@ def _generate_contract(
     limit = float(task.get("budget_limit_usd", 8.0))
     ledger = BudgetLedger.open_or_upgrade(task_root / "budget.json", limit)
     provider = ZhipuProvider(config, select_live_models(config), ledger, task_root / "research/responses")
+    contract_model = provider.selected_models["ideation"].model_id
+    model_key = re.sub(r"[^a-z0-9]+", "-", contract_model.casefold()).strip("-")
     prompt = (
         "Convert the submitted research direction into a machine-checkable experimental contract for the currently supported "
         "supervised image-classification runtime. Preserve every explicit baseline, intervention, metric scope, guardrail, "
         "repeat count, threshold, and ablation. Mark unsupported if it requires segmentation, WSI, survival, or multimodal inputs. "
         "implementation_signals must be short Python identifier tokens that should genuinely occur in an implementation; do not "
-        "use dataset names or generic words such as model/train/loss. A missing success threshold is represented by "
+        "use dataset names or generic words such as model/train/loss. Do not put fixed controls such as paired seeds, "
+        "sealed test evaluation, early stopping, fixed optimizer, or no pretraining in implementation_signals; those "
+        "belong in the contract's repeat and experiment policies. A missing success threshold is represented by "
         "has_improvement_threshold=false and minimum_improvement_delta=0.\n\n"
         f"DIRECTION:\n{direction}\n\nREVISION FEEDBACK:\n{revision_feedback or '(none)'}\n\n"
-        f"DATASET FACTS:\n{json.dumps({'classes': profile.get('classes'), 'split_counts': profile.get('split_counts'), 'recommended_metrics': profile.get('recommended_metrics')}, ensure_ascii=False)}"
+        f"DATASET FACTS:\n{json.dumps({'name': profile.get('display_name') or profile.get('name'), 'image_shape': profile.get('image_shape'), 'channels': profile.get('channels'), 'classes': profile.get('classes'), 'split_counts': profile.get('split_counts'), 'recommended_metrics': profile.get('recommended_metrics')}, ensure_ascii=False)}"
     )
     fingerprint = hashlib.sha256((direction + "\n" + revision_feedback).encode("utf-8")).hexdigest()[:16]
     extraction, _ = provider.call_json(
-        "ideation", f"{task['task_id']}-research-contract-v1-{fingerprint}",
+        "ideation", f"{task['task_id']}-research-contract-v1-{model_key}-{fingerprint}",
         "You are a scientific protocol designer. Return only the requested JSON object.",
         prompt, "research_contract_extraction", extraction_schema(),
     )
-    return contract_from_extraction(
+    return bind_budget(contract_from_extraction(
         direction, profile, extraction, split_seed=split_seed, revision_feedback=revision_feedback
-    )
+    ))
 
 
 def _write(path: Path, value: dict) -> None:
@@ -64,12 +79,14 @@ def _write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _queries(direction: str) -> list[str]:
+def _queries(direction: str, profile: dict) -> list[str]:
     english = re.sub(r"[^A-Za-z0-9 -]+", " ", direction).strip()
+    dataset_name = str(profile.get("display_name") or profile.get("name") or "image dataset")
+    class_count = len(profile.get("classes") or [])
     queries = [
-        "PathMNIST histopathology image classification benchmark",
-        "adaptive resolution dynamic routing computational pathology",
-        "conditional computation image classification early exit",
+        f"{dataset_name} supervised image classification benchmark",
+        f"{class_count}-class image classification {dataset_name}",
+        "reproducible supervised image classification paired seeds",
     ]
     if len(english.split()) >= 3:
         queries.insert(0, english[:180])
@@ -95,12 +112,19 @@ def prepare_research(
     now = datetime.now(timezone.utc).isoformat()
     profile = json.loads((root / "dataset/dataset_profile.json").read_text(encoding="utf-8"))
 
+    dataset_name = str(profile.get("display_name") or profile.get("name") or "dataset")
     understanding = {
         "schema_version": 1,
         "research_direction": direction,
         "research_question": direction,
-        "claim_boundary": "benchmark patch classification only; no clinical or patient-level claims",
-        "primary_metrics": profile.get("recommended_metrics", ["macro_f1", "accuracy"]),
+        "dataset_name": dataset_name,
+        "classes": profile.get("classes", []),
+        "channels": profile.get("channels"),
+        "image_shape": profile.get("image_shape"),
+        "claim_boundary": "research image classification only; no clinical or patient-level claims",
+        "primary_metrics": profile.get(
+            "recommended_metrics", ["macro_f1", "accuracy", "weighted_f1"]
+        ),
         "created_at": now,
     }
     _write(root / "research/research_understanding.json", understanding)
@@ -109,7 +133,7 @@ def prepare_research(
     failures: list[dict] = []
     seen: set[str] = set()
     rejected: list[dict] = []
-    for query in _queries(direction):
+    for query in _queries(direction, profile):
         try:
             papers = search(query)
         except LiteratureError as exc:
@@ -145,7 +169,7 @@ def prepare_research(
 
     idea = {
         "schema_version": 1,
-        "title": "Agent-designed pathology image classification study",
+        "title": f"Agent-designed supervised image classification study on {dataset_name}",
         "hypothesis": direction,
         "novelty_context": [reference["title"] for reference in results[:8]],
         "claim_boundary": understanding["claim_boundary"],
